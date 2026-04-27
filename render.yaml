@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: sevenx-content-factory
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: CHANNEL_1_ID
+        sync: false
+      - key: CHANNEL_2_ID
+        sync: false
+      - key: IMAGES_DIR
+        value: /tmp/images
+      - key: DATABASE_URL
+        fromDatabase:
+          name: sevenx-db
+          property: connectionString
+
+databases:
+  - name: sevenx-db
+    plan: free

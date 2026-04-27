@@ -1,0 +1,835 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Seven-X Content Factory</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<style>
+  [x-cloak]{display:none!important}
+  ::-webkit-scrollbar{width:5px;height:5px}
+  ::-webkit-scrollbar-track{background:#0a1910}
+  ::-webkit-scrollbar-thumb{background:#2d6a4f;border-radius:4px}
+  body{font-family:system-ui,-apple-system,sans-serif}
+  .spin{animation:spin 1s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .fade-in{animation:fadeIn .25s ease}
+  @keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+</style>
+</head>
+<body class="bg-[#0a1910] text-white min-h-screen" x-data="app()" x-cloak>
+
+<!-- Notification toast -->
+<div x-show="toast.show" x-transition:enter="transition ease-out duration-300"
+     x-transition:enter-start="opacity-0 translate-y-2" x-transition:enter-end="opacity-100 translate-y-0"
+     x-transition:leave="transition ease-in duration-200" x-transition:leave-end="opacity-0"
+     class="fixed top-5 right-5 z-50 max-w-xs" x-cloak>
+  <div :class="toast.type==='error'?'bg-red-900/95 border-red-600':'bg-[#1a4a35]/95 border-[#52b788]'"
+       class="border rounded-2xl px-4 py-3 shadow-2xl backdrop-blur text-sm flex items-center gap-2">
+    <span x-text="toast.type==='error'?'❌':'✅'"></span>
+    <span x-text="toast.msg"></span>
+  </div>
+</div>
+
+<!-- Layout -->
+<div class="flex h-screen overflow-hidden">
+
+  <!-- Sidebar -->
+  <aside class="w-60 bg-[#071410] border-r border-[#152b1f] flex flex-col p-4 flex-shrink-0">
+    <!-- Logo -->
+    <div class="flex items-center gap-3 mb-8 px-1">
+      <div class="w-9 h-9 bg-[#2d6a4f] rounded-xl flex items-center justify-center font-black text-sm">7X</div>
+      <div>
+        <div class="text-sm font-bold leading-tight">Content Factory</div>
+        <div class="text-[#3d6b52] text-xs">Seven-X</div>
+      </div>
+    </div>
+
+    <!-- Nav -->
+    <nav class="flex-1 space-y-1">
+      <template x-for="item in navItems" :key="item.id">
+        <button @click="switchTab(item.id)"
+                :class="tab===item.id?'bg-[#2d6a4f] text-white':'text-[#5a8a6a] hover:bg-[#152b1f] hover:text-white'"
+                class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all">
+          <span x-text="item.icon" class="text-base w-5 text-center"></span>
+          <span x-text="item.label"></span>
+          <span x-show="item.id==='queue' && queueCount>0"
+                class="ml-auto bg-[#52b788] text-[#071410] text-xs px-2 py-0.5 rounded-full font-bold"
+                x-text="queueCount"></span>
+        </button>
+      </template>
+    </nav>
+
+    <!-- Settings -->
+    <div class="border-t border-[#152b1f] pt-3 mt-3">
+      <button @click="switchTab('settings')"
+              :class="tab==='settings'?'bg-[#2d6a4f] text-white':'text-[#5a8a6a] hover:bg-[#152b1f] hover:text-white'"
+              class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all">
+        <span class="text-base w-5 text-center">⚙️</span>
+        <span>Настройки</span>
+      </button>
+    </div>
+
+    <!-- Currency widget -->
+    <div class="border-t border-[#152b1f] pt-3 mt-3">
+      <div class="text-[#3d6b52] text-xs px-1 mb-2">Курсы ЦБ РФ</div>
+      <template x-for="[cur, rate] in Object.entries(currency.rates||{})" :key="cur">
+        <div class="flex justify-between px-2 py-1 rounded-lg hover:bg-[#152b1f]">
+          <span class="text-[#5a8a6a] text-xs" x-text="cur"></span>
+          <span class="text-white text-xs font-medium" x-text="rate+' ₽'"></span>
+        </div>
+      </template>
+      <div x-show="!currency.rates||!Object.keys(currency.rates).length" class="px-1 text-[#3d6b52] text-xs">Загрузка...</div>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="flex-1 overflow-y-auto">
+
+    <!-- ═══ GENERATOR ═══════════════════════════════════════════════════════ -->
+    <div x-show="tab==='generator'" class="p-6 max-w-4xl mx-auto fade-in">
+      <div class="mb-5">
+        <h1 class="text-xl font-bold">Создать пост</h1>
+        <p class="text-[#5a8a6a] text-sm mt-0.5">GPT-4o генерирует текст · DALL-E 3 рисует картинку</p>
+      </div>
+
+      <!-- Config card -->
+      <div class="bg-[#0f2018] border border-[#1a3328] rounded-2xl p-5 mb-5">
+        <!-- Topic input -->
+        <label class="block text-xs text-[#5a8a6a] mb-1.5">Тема поста</label>
+        <input x-model="gen.topic" type="text" @keyup.enter="generate()"
+               placeholder="Например: как платить за товары из Китая в 2025 году"
+               class="w-full bg-[#071410] border border-[#1a3328] text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-[#52b788] transition-colors placeholder-[#2d5040] mb-4">
+
+        <!-- Preset topics -->
+        <div class="mb-4">
+          <div class="text-xs text-[#5a8a6a] mb-2">Готовые темы:</div>
+          <div class="flex flex-wrap gap-1.5">
+            <template x-for="p in presets" :key="p">
+              <button @click="gen.topic=p"
+                      :class="gen.topic===p?'bg-[#2d6a4f] border-[#52b788] text-white':'border-[#1a3328] text-[#5a8a6a] hover:border-[#2d6a4f]'"
+                      class="text-xs px-2.5 py-1 rounded-lg border transition-all" x-text="p"></button>
+            </template>
+          </div>
+        </div>
+
+        <!-- Style -->
+        <div class="mb-4">
+          <div class="text-xs text-[#5a8a6a] mb-2">Стиль:</div>
+          <div class="flex gap-2 flex-wrap">
+            <template x-for="s in styles" :key="s.id">
+              <button @click="gen.style=s.id"
+                      :class="gen.style===s.id?'bg-[#2d6a4f] border-[#52b788] text-white':'border-[#1a3328] text-[#5a8a6a] hover:border-[#2d6a4f]'"
+                      class="text-sm px-4 py-2 rounded-xl border transition-all">
+                <span x-text="s.icon+' '+s.label"></span>
+              </button>
+            </template>
+          </div>
+        </div>
+
+        <!-- Options row -->
+        <div class="flex items-center gap-6 mb-4">
+          <label class="flex items-center gap-2 cursor-pointer select-none" @click="gen.includeRates=!gen.includeRates">
+            <div :class="gen.includeRates?'bg-[#2d6a4f]':'bg-[#1a3328]'"
+                 class="w-9 h-5 rounded-full p-0.5 flex items-center transition-colors">
+              <div :class="gen.includeRates?'translate-x-4':'translate-x-0'"
+                   class="w-4 h-4 bg-white rounded-full transition-transform"></div>
+            </div>
+            <span class="text-sm text-[#5a8a6a]">Добавить курсы валют</span>
+          </label>
+        </div>
+
+        <!-- Generate btn -->
+        <button @click="generate()" :disabled="!gen.topic||gen.loading"
+                class="w-full bg-[#2d6a4f] hover:bg-[#3d8a65] disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-xl transition-all flex items-center justify-center gap-2">
+          <svg x-show="gen.loading" class="spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+          </svg>
+          <span x-text="gen.loading?'Генерируем 3 варианта...':'🚀 Генерировать 3 варианта'"></span>
+        </button>
+      </div>
+
+      <!-- Variants -->
+      <div x-show="gen.variants.length" class="space-y-4 fade-in">
+        <div class="text-sm font-semibold text-[#5a8a6a]">Выберите вариант, отредактируйте и опубликуйте:</div>
+
+        <template x-for="(v, i) in gen.variants" :key="i">
+          <div :class="gen.selected===i?'border-[#52b788] shadow-[0_0_0_1px_#52b788]':'border-[#1a3328]'"
+               class="bg-[#0f2018] border-2 rounded-2xl p-5 transition-all">
+
+            <!-- Header -->
+            <div class="flex items-center justify-between mb-3">
+              <span class="text-xs font-semibold text-[#52b788] uppercase tracking-wide">Вариант <span x-text="i+1"></span></span>
+              <button @click="gen.selected=i"
+                      :class="gen.selected===i?'bg-[#2d6a4f] text-white':'border border-[#1a3328] text-[#5a8a6a] hover:border-[#52b788]'"
+                      class="text-xs px-3 py-1 rounded-lg transition-all">
+                <span x-text="gen.selected===i?'✓ Выбран':'Выбрать'"></span>
+              </button>
+            </div>
+
+            <!-- Text (view / edit) -->
+            <div x-show="gen.editing!==i">
+              <p class="text-sm text-[#c8e6d0] whitespace-pre-wrap leading-relaxed mb-2" x-text="v.text"></p>
+              <p class="text-xs text-[#3d6b52]" x-text="v.hashtags"></p>
+            </div>
+            <div x-show="gen.editing===i">
+              <textarea x-model="v.text" rows="6"
+                        class="w-full bg-[#071410] border border-[#1a3328] text-white rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-[#52b788] mb-2"></textarea>
+              <input x-model="v.hashtags" placeholder="#хэштеги"
+                     class="w-full bg-[#071410] border border-[#1a3328] text-[#5a8a6a] rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-[#52b788]">
+            </div>
+
+            <!-- Action row -->
+            <div class="flex gap-2 mt-3 flex-wrap">
+              <button @click="gen.editing=gen.editing===i?null:i"
+                      class="bg-[#071410] border border-[#1a3328] hover:border-[#2d6a4f] text-[#5a8a6a] text-xs px-3 py-1.5 rounded-lg transition-all">
+                <span x-text="gen.editing===i?'💾 Готово':'✏️ Редактировать'"></span>
+              </button>
+              <button @click="generateImage(i)" :disabled="gen.imgLoading===i"
+                      class="bg-[#071410] border border-[#1a3328] hover:border-[#2d6a4f] text-[#5a8a6a] text-xs px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5">
+                <svg x-show="gen.imgLoading===i" class="spin w-3 h-3" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                </svg>
+                <span x-text="gen.imgLoading===i?'Рисуем...':'🎨 Картинка'"></span>
+              </button>
+            </div>
+
+            <!-- Image preview -->
+            <div x-show="v.image_url" class="mt-4">
+              <img :src="v.image_url" class="rounded-xl max-w-xs w-full object-cover aspect-square">
+            </div>
+          </div>
+        </template>
+
+        <!-- Publish panel -->
+        <div x-show="gen.selected!==null" class="bg-[#0f2018] border border-[#1a3328] rounded-2xl p-5 fade-in">
+          <div class="text-sm font-semibold mb-4">Публикация</div>
+          <div class="flex flex-wrap gap-3 items-center">
+            <button @click="publishNow()" :disabled="gen.publishing"
+                    class="bg-[#2d6a4f] hover:bg-[#3d8a65] disabled:opacity-40 text-white text-sm font-medium px-5 py-2.5 rounded-xl transition-all flex items-center gap-2">
+              <svg x-show="gen.publishing" class="spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+              </svg>
+              <span x-text="gen.publishing?'Публикуем...':'📤 Опубликовать сейчас'"></span>
+            </button>
+
+            <div class="flex gap-2 items-center">
+              <input type="datetime-local" x-model="gen.scheduleAt"
+                     class="bg-[#071410] border border-[#1a3328] text-white rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-[#52b788]">
+              <button @click="schedulePost()" :disabled="!gen.scheduleAt"
+                      class="bg-[#071410] border border-[#1a3328] hover:border-[#2d6a4f] disabled:opacity-40 text-[#5a8a6a] text-sm px-4 py-2.5 rounded-xl transition-all">
+                🗓 Запланировать
+              </button>
+            </div>
+
+            <button @click="saveDraft()"
+                    class="bg-[#071410] border border-[#1a3328] hover:border-[#2d6a4f] text-[#5a8a6a] text-sm px-4 py-2.5 rounded-xl transition-all">
+              💾 Черновик
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ CALENDAR ════════════════════════════════════════════════════════ -->
+    <div x-show="tab==='calendar'" class="p-6 fade-in">
+      <div class="flex items-center justify-between mb-5">
+        <div>
+          <h1 class="text-xl font-bold">Календарь</h1>
+          <p class="text-[#5a8a6a] text-sm mt-0.5">Расписание публикаций</p>
+        </div>
+        <div class="flex items-center gap-3">
+          <button @click="prevMonth()" class="bg-[#0f2018] border border-[#1a3328] hover:border-[#2d6a4f] text-[#5a8a6a] px-3 py-2 rounded-xl text-sm transition-all">←</button>
+          <span class="text-white font-medium text-sm min-w-36 text-center" x-text="calMonthName"></span>
+          <button @click="nextMonth()" class="bg-[#0f2018] border border-[#1a3328] hover:border-[#2d6a4f] text-[#5a8a6a] px-3 py-2 rounded-xl text-sm transition-all">→</button>
+        </div>
+      </div>
+
+      <div class="bg-[#0f2018] border border-[#1a3328] rounded-2xl overflow-hidden">
+        <!-- Day headers -->
+        <div class="grid grid-cols-7 border-b border-[#1a3328]">
+          <template x-for="d in ['Пн','Вт','Ср','Чт','Пт','Сб','Вс']" :key="d">
+            <div class="py-2.5 text-center text-xs text-[#3d6b52] font-medium" x-text="d"></div>
+          </template>
+        </div>
+        <!-- Days grid -->
+        <div class="grid grid-cols-7">
+          <template x-for="(day, idx) in calDays" :key="idx">
+            <div :class="[
+                   'min-h-20 p-2 border-b border-r border-[#1a3328]',
+                   day.today?'bg-[#152b1f]':'',
+                   !day.cur?'opacity-30':'',
+                   day.posts?.length?'cursor-pointer hover:bg-[#152b1f]':''
+                 ]"
+                 @click="day.posts?.length&&(calDay=day)">
+              <div class="flex justify-between items-start mb-1">
+                <span :class="day.today?'bg-[#52b788] text-[#071410] w-5 h-5 rounded-full flex items-center justify-center':'text-[#5a8a6a]'"
+                      class="text-xs font-medium" x-text="day.d"></span>
+                <span x-show="day.posts?.length"
+                      class="text-xs bg-[#2d6a4f] text-white px-1.5 py-0.5 rounded-md leading-none"
+                      x-text="day.posts.length"></span>
+              </div>
+              <template x-for="p in (day.posts||[]).slice(0,2)" :key="p.id">
+                <div :class="p.status==='published'?'bg-[#52b788]/15 border-[#52b788]/25':'bg-[#2d6a4f]/15 border-[#2d6a4f]/25'"
+                     class="text-xs border rounded px-1 py-0.5 mb-0.5 truncate text-[#c8e6d0]"
+                     x-text="p.topic||p.text.substring(0,25)"></div>
+              </template>
+              <div x-show="(day.posts||[]).length>2" class="text-xs text-[#3d6b52]"
+                   x-text="'+'+(day.posts.length-2)+' ещё'"></div>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- Day detail -->
+      <div x-show="calDay" @click.self="calDay=null"
+           class="fixed inset-0 bg-black/60 flex items-center justify-center z-40 p-4" x-cloak>
+        <div class="bg-[#0f2018] border border-[#1a3328] rounded-2xl p-5 max-w-md w-full">
+          <div class="flex justify-between items-center mb-4">
+            <span class="font-semibold text-sm" x-text="calDay?.label"></span>
+            <button @click="calDay=null" class="text-[#3d6b52] hover:text-white text-lg leading-none">×</button>
+          </div>
+          <template x-for="p in calDay?.posts" :key="p.id">
+            <div class="bg-[#071410] border border-[#1a3328] rounded-xl p-3 mb-2">
+              <div class="flex items-center gap-2 mb-1">
+                <span :class="p.status==='published'?'text-[#52b788]':'text-yellow-400'"
+                      class="text-xs" x-text="p.status==='published'?'✓ Опубликован':'🗓 Запланирован'"></span>
+              </div>
+              <p class="text-sm text-[#c8e6d0]" x-text="p.text"></p>
+            </div>
+          </template>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ QUEUE ════════════════════════════════════════════════════════════ -->
+    <div x-show="tab==='queue'" class="p-6 max-w-2xl mx-auto fade-in">
+      <div class="mb-5">
+        <h1 class="text-xl font-bold">Очередь</h1>
+        <p class="text-[#5a8a6a] text-sm mt-0.5">Запланированные посты</p>
+      </div>
+
+      <div x-show="!queuePosts.length" class="bg-[#0f2018] border border-[#1a3328] rounded-2xl p-10 text-center">
+        <div class="text-4xl mb-3">📋</div>
+        <p class="text-[#5a8a6a] text-sm">Очередь пуста. Создайте и запланируйте пост.</p>
+      </div>
+
+      <div class="space-y-3">
+        <template x-for="p in queuePosts" :key="p.id">
+          <div class="bg-[#0f2018] border border-[#1a3328] rounded-2xl p-4 flex gap-4">
+            <div class="flex-shrink-0">
+              <img x-show="p.image_path" :src="p.image_path" class="w-14 h-14 rounded-xl object-cover">
+              <div x-show="!p.image_path" class="w-14 h-14 bg-[#152b1f] rounded-xl flex items-center justify-center text-2xl">📝</div>
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="flex justify-between items-start gap-2 mb-1">
+                <span class="text-xs font-medium text-white truncate" x-text="p.topic||'Без темы'"></span>
+                <span class="text-xs text-[#52b788] flex-shrink-0" x-text="fmtDate(p.scheduled_at)"></span>
+              </div>
+              <p class="text-xs text-[#5a8a6a] line-clamp-2 mb-3" x-text="p.text"></p>
+              <div class="flex gap-2">
+                <button @click="pubPost(p.id,'queue')"
+                        class="bg-[#2d6a4f] hover:bg-[#3d8a65] text-white text-xs px-3 py-1.5 rounded-lg transition-all">📤 Сейчас</button>
+                <button @click="delPost(p.id,'queue')"
+                        class="bg-red-900/20 hover:bg-red-800/40 border border-red-800/30 text-red-400 text-xs px-3 py-1.5 rounded-lg transition-all">🗑</button>
+              </div>
+            </div>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- ═══ HISTORY ══════════════════════════════════════════════════════════ -->
+    <div x-show="tab==='history'" class="p-6 fade-in">
+      <div class="mb-5">
+        <h1 class="text-xl font-bold">История</h1>
+        <p class="text-[#5a8a6a] text-sm mt-0.5">Опубликованные посты</p>
+      </div>
+
+      <div x-show="!histPosts.length" class="bg-[#0f2018] border border-[#1a3328] rounded-2xl p-10 text-center">
+        <div class="text-4xl mb-3">📊</div>
+        <p class="text-[#5a8a6a] text-sm">Ещё нет опубликованных постов.</p>
+      </div>
+
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <template x-for="p in histPosts" :key="p.id">
+          <div class="bg-[#0f2018] border border-[#1a3328] rounded-2xl overflow-hidden">
+            <div x-show="p.image_path" class="relative">
+              <img :src="p.image_path" class="w-full h-44 object-cover">
+              <div class="absolute top-2 right-2 bg-[#52b788]/90 backdrop-blur text-[#071410] text-xs font-semibold px-2 py-1 rounded-lg">✓ Опубликован</div>
+            </div>
+            <div class="p-4">
+              <p class="text-xs text-[#52b788] mb-1" x-text="fmtDate(p.published_at)"></p>
+              <p class="text-sm text-[#c8e6d0] line-clamp-4 leading-relaxed" x-text="p.text"></p>
+              <p x-show="p.hashtags" class="text-xs text-[#3d6b52] mt-2" x-text="p.hashtags"></p>
+            </div>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- ═══ DRAFTS ════════════════════════════════════════════════════════════ -->
+    <div x-show="tab==='drafts'" class="p-6 max-w-2xl mx-auto fade-in">
+      <div class="mb-5">
+        <h1 class="text-xl font-bold">Черновики</h1>
+        <p class="text-[#5a8a6a] text-sm mt-0.5">Сохранённые, но не опубликованные</p>
+      </div>
+
+      <div x-show="!draftPosts.length" class="bg-[#0f2018] border border-[#1a3328] rounded-2xl p-10 text-center">
+        <div class="text-4xl mb-3">📝</div>
+        <p class="text-[#5a8a6a] text-sm">Нет черновиков.</p>
+      </div>
+
+      <div class="space-y-3">
+        <template x-for="p in draftPosts" :key="p.id">
+          <div class="bg-[#0f2018] border border-[#1a3328] rounded-2xl p-4 flex gap-4">
+            <div class="flex-shrink-0">
+              <img x-show="p.image_path" :src="p.image_path" class="w-14 h-14 rounded-xl object-cover">
+              <div x-show="!p.image_path" class="w-14 h-14 bg-[#152b1f] rounded-xl flex items-center justify-center text-2xl">📝</div>
+            </div>
+            <div class="flex-1 min-w-0">
+              <p class="text-xs text-[#3d6b52] mb-1" x-text="fmtDate(p.created_at)"></p>
+              <p class="text-sm text-[#c8e6d0] line-clamp-2 mb-3" x-text="p.text"></p>
+              <div class="flex gap-2">
+                <button @click="pubPost(p.id,'drafts')"
+                        class="bg-[#2d6a4f] hover:bg-[#3d8a65] text-white text-xs px-3 py-1.5 rounded-lg transition-all">📤 Опубликовать</button>
+                <button @click="delPost(p.id,'drafts')"
+                        class="bg-red-900/20 hover:bg-red-800/40 border border-red-800/30 text-red-400 text-xs px-3 py-1.5 rounded-lg transition-all">🗑</button>
+              </div>
+            </div>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- ═══ SETTINGS ══════════════════════════════════════════════════════════ -->
+    <div x-show="tab==='settings'" class="p-6 max-w-xl mx-auto fade-in">
+      <div class="mb-5">
+        <h1 class="text-xl font-bold">Настройки</h1>
+        <p class="text-[#5a8a6a] text-sm mt-0.5">Конфигурация системы</p>
+      </div>
+
+      <!-- API Keys -->
+      <div class="bg-[#0f2018] border border-[#1a3328] rounded-2xl p-5 mb-4">
+        <h2 class="text-sm font-semibold mb-4">🔑 API ключи</h2>
+        <div class="space-y-3">
+          <div>
+            <label class="block text-xs text-[#5a8a6a] mb-1">OpenAI API Key</label>
+            <input x-model="sf.openai_api_key" type="password"
+                   :placeholder="settings.openai_api_key_masked||'sk-...'"
+                   class="w-full bg-[#071410] border border-[#1a3328] text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-[#52b788] transition-colors placeholder-[#2d5040]">
+          </div>
+          <div>
+            <label class="block text-xs text-[#5a8a6a] mb-1">Telegram Bot Token</label>
+            <div class="flex gap-2">
+              <input x-model="sf.telegram_bot_token" type="password"
+                     :placeholder="settings.telegram_bot_token_masked||'123456:ABC...'"
+                     class="flex-1 bg-[#071410] border border-[#1a3328] text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-[#52b788] transition-colors placeholder-[#2d5040]">
+              <button @click="testTg()"
+                      class="bg-[#071410] border border-[#1a3328] hover:border-[#2d6a4f] text-[#5a8a6a] text-sm px-4 py-2.5 rounded-xl transition-all flex-shrink-0">Тест</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Channels -->
+      <div class="bg-[#0f2018] border border-[#1a3328] rounded-2xl p-5 mb-4">
+        <h2 class="text-sm font-semibold mb-4">📢 Telegram каналы</h2>
+        <div class="space-y-3">
+          <div>
+            <label class="block text-xs text-[#5a8a6a] mb-1">Канал 1</label>
+            <input x-model="sf.channel_1_id"
+                   :placeholder="settings.channel_1_id||'@channel или -1001234567890'"
+                   class="w-full bg-[#071410] border border-[#1a3328] text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-[#52b788] transition-colors placeholder-[#2d5040]">
+          </div>
+          <div>
+            <label class="block text-xs text-[#5a8a6a] mb-1">Канал 2</label>
+            <input x-model="sf.channel_2_id"
+                   :placeholder="settings.channel_2_id||'@channel или -1001234567890'"
+                   class="w-full bg-[#071410] border border-[#1a3328] text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-[#52b788] transition-colors placeholder-[#2d5040]">
+          </div>
+        </div>
+      </div>
+
+      <!-- Auto-post schedule -->
+      <div class="bg-[#0f2018] border border-[#1a3328] rounded-2xl p-5 mb-4">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-sm font-semibold">⏰ Авторасписание</h2>
+          <div @click="sf.auto_post_enabled=sf.auto_post_enabled==='true'?'false':'true'"
+               :class="sf.auto_post_enabled==='true'?'bg-[#2d6a4f]':'bg-[#1a3328]'"
+               class="w-9 h-5 rounded-full p-0.5 flex items-center transition-colors cursor-pointer">
+            <div :class="sf.auto_post_enabled==='true'?'translate-x-4':'translate-x-0'"
+                 class="w-4 h-4 bg-white rounded-full transition-transform"></div>
+          </div>
+        </div>
+        <div x-show="sf.auto_post_enabled==='true'" class="space-y-2">
+          <label class="block text-xs text-[#5a8a6a] mb-2">Время публикаций (берёт первый пост из очереди)</label>
+          <template x-for="(t, i) in autoTimes" :key="i">
+            <div class="flex gap-2">
+              <input type="time" x-model="autoTimes[i]"
+                     class="flex-1 bg-[#071410] border border-[#1a3328] text-white rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-[#52b788]">
+              <button @click="autoTimes.splice(i,1)"
+                      class="bg-red-900/20 border border-red-800/30 text-red-400 text-xs px-3 py-2 rounded-xl transition-all">✕</button>
+            </div>
+          </template>
+          <button @click="autoTimes.push('12:00')"
+                  class="bg-[#071410] border border-[#1a3328] hover:border-[#2d6a4f] text-[#5a8a6a] text-xs px-4 py-2 rounded-xl transition-all">+ Добавить время</button>
+        </div>
+      </div>
+
+      <!-- Brand voice -->
+      <div class="bg-[#0f2018] border border-[#1a3328] rounded-2xl p-5 mb-4">
+        <h2 class="text-sm font-semibold mb-2">🎙 Голос бренда</h2>
+        <p class="text-xs text-[#3d6b52] mb-3">Системный промпт GPT. Оставьте пустым — будет стандартный о Seven-X.</p>
+        <textarea x-model="sf.brand_voice" rows="6"
+                  class="w-full bg-[#071410] border border-[#1a3328] text-white rounded-xl px-3 py-2.5 text-xs focus:outline-none focus:border-[#52b788] transition-colors resize-y"></textarea>
+      </div>
+
+      <!-- Save -->
+      <button @click="saveSettings()" :disabled="sf.saving"
+              class="w-full bg-[#2d6a4f] hover:bg-[#3d8a65] disabled:opacity-40 text-white font-semibold py-3 rounded-xl transition-all flex items-center justify-center gap-2">
+        <svg x-show="sf.saving" class="spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+        </svg>
+        <span x-text="sf.saving?'Сохраняем...':'💾 Сохранить настройки'"></span>
+      </button>
+    </div>
+
+  </main>
+</div>
+
+<script>
+function app() {
+  return {
+    tab: 'generator',
+
+    navItems: [
+      { id: 'generator', icon: '✏️', label: 'Создать пост' },
+      { id: 'calendar',  icon: '📅', label: 'Календарь'   },
+      { id: 'queue',     icon: '📋', label: 'Очередь'     },
+      { id: 'history',   icon: '📊', label: 'История'     },
+      { id: 'drafts',    icon: '📝', label: 'Черновики'   },
+    ],
+
+    presets: [
+      'Как платить за товары из Китая',
+      'Работа с санкционными товарами',
+      'Выкуп валютной выручки с бонусом 1–3%',
+      'Возврат НДС из Китая до 40%',
+      'Платежи через Alipay и WeChat',
+      'Рубли утром — платёж вечером',
+      '40+ компаний-плательщиков по всему миру',
+      'Работа с наличными по всему миру',
+      'Тарифы на импортные платежи',
+      'Как вернуть экспортную выручку в Россию',
+      'Кейс клиента: нестандартная схема',
+      'FAQ: как работает ВЭД-платёж через Seven-X',
+    ],
+
+    styles: [
+      { id: 'expert', icon: '🎓', label: 'Экспертный' },
+      { id: 'casual', icon: '💬', label: 'Живой'      },
+      { id: 'case',   icon: '📖', label: 'Кейс'       },
+      { id: 'faq',    icon: '❓', label: 'FAQ'         },
+    ],
+
+    // Generator state
+    gen: {
+      topic: '', style: 'expert', includeRates: false,
+      loading: false, imgLoading: null, publishing: false,
+      variants: [], selected: null, editing: null, scheduleAt: '',
+    },
+
+    // Data
+    currency: {},
+    settings: {},
+    queuePosts: [], histPosts: [], draftPosts: [],
+    queueCount: 0,
+
+    // Calendar
+    calMonth: new Date(),
+    calDays: [],
+    calData: {},
+    calDay: null,
+
+    // Settings form
+    sf: {
+      openai_api_key: '', telegram_bot_token: '',
+      channel_1_id: '', channel_2_id: '',
+      auto_post_enabled: 'false', brand_voice: '',
+      saving: false,
+    },
+    autoTimes: ['10:00', '19:00'],
+
+    // Toast
+    toast: { show: false, msg: '', type: 'success' },
+    _toastTimer: null,
+
+    // ── Init ────────────────────────────────────────────────────────────────
+    async init() {
+      await Promise.all([this.loadCurrency(), this.loadSettings()]);
+      this.loadQueue();
+    },
+
+    async switchTab(id) {
+      this.tab = id;
+      if (id === 'calendar') { await this.loadCal(); }
+      if (id === 'queue')    { await this.loadQueue(); }
+      if (id === 'history')  { await this.loadHist(); }
+      if (id === 'drafts')   { await this.loadDrafts(); }
+    },
+
+    // ── Toast ───────────────────────────────────────────────────────────────
+    notify(msg, type='success') {
+      clearTimeout(this._toastTimer);
+      this.toast = { show: true, msg, type };
+      this._toastTimer = setTimeout(() => this.toast.show = false, 4000);
+    },
+
+    // ── Currency ────────────────────────────────────────────────────────────
+    async loadCurrency() {
+      try {
+        const r = await fetch('/api/currency');
+        this.currency = await r.json();
+      } catch(e) {}
+    },
+
+    // ── Settings ────────────────────────────────────────────────────────────
+    async loadSettings() {
+      try {
+        const r = await fetch('/api/settings');
+        this.settings = await r.json();
+        this.sf.channel_1_id = this.settings.channel_1_id || '';
+        this.sf.channel_2_id = this.settings.channel_2_id || '';
+        this.sf.auto_post_enabled = this.settings.auto_post_enabled || 'false';
+        this.sf.brand_voice = this.settings.brand_voice || '';
+        try { this.autoTimes = JSON.parse(this.settings.auto_post_times || '["10:00","19:00"]'); } catch(e) {}
+      } catch(e) {}
+    },
+
+    async saveSettings() {
+      this.sf.saving = true;
+      try {
+        const body = {
+          channel_1_id: this.sf.channel_1_id,
+          channel_2_id: this.sf.channel_2_id,
+          auto_post_enabled: this.sf.auto_post_enabled,
+          auto_post_times: JSON.stringify(this.autoTimes),
+          brand_voice: this.sf.brand_voice,
+        };
+        if (this.sf.openai_api_key) body.openai_api_key = this.sf.openai_api_key;
+        if (this.sf.telegram_bot_token) body.telegram_bot_token = this.sf.telegram_bot_token;
+
+        const r = await fetch('/api/settings', {
+          method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body)
+        });
+        if (r.ok) { this.notify('Настройки сохранены'); await this.loadSettings(); }
+        else this.notify('Ошибка сохранения', 'error');
+      } finally { this.sf.saving = false; }
+    },
+
+    async testTg() {
+      const r = await fetch('/api/test-telegram', { method: 'POST' });
+      const d = await r.json();
+      d.success ? this.notify(`✅ Бот @${d.bot_name} подключён`) : this.notify('❌ '+d.error, 'error');
+    },
+
+    // ── Generator ───────────────────────────────────────────────────────────
+    async generate() {
+      if (!this.gen.topic || this.gen.loading) return;
+      this.gen.loading = true;
+      this.gen.variants = [];
+      this.gen.selected = null;
+      this.gen.editing = null;
+      try {
+        const r = await fetch('/api/generate', {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({
+            topic: this.gen.topic, style: this.gen.style,
+            include_rates: this.gen.includeRates,
+            brand_voice: this.sf.brand_voice || null,
+          })
+        });
+        if (!r.ok) { const e = await r.json(); this.notify(e.detail||'Ошибка', 'error'); return; }
+        const d = await r.json();
+        this.gen.variants = d.variants.map(v => ({...v, image_url: ''}));
+      } catch(e) { this.notify('Ошибка соединения', 'error'); }
+      finally { this.gen.loading = false; }
+    },
+
+    async generateImage(i) {
+      this.gen.imgLoading = i;
+      try {
+        const r = await fetch('/api/generate/image', {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ topic: this.gen.topic, post_text: this.gen.variants[i].text })
+        });
+        if (!r.ok) { const e = await r.json(); this.notify(e.detail||'Ошибка картинки', 'error'); return; }
+        const d = await r.json();
+        this.gen.variants[i].image_url = d.image_url;
+      } catch(e) { this.notify('Ошибка генерации картинки', 'error'); }
+      finally { this.gen.imgLoading = null; }
+    },
+
+    async _createPost(status, scheduled_at=null) {
+      const v = this.gen.variants[this.gen.selected];
+      const r = await fetch('/api/posts', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({
+          topic: this.gen.topic, text: v.text,
+          image_path: v.image_url || '', style: this.gen.style,
+          hashtags: v.hashtags || '', status, scheduled_at,
+        })
+      });
+      return (await r.json()).id;
+    },
+
+    async publishNow() {
+      if (this.gen.selected === null) return;
+      this.gen.publishing = true;
+      try {
+        const id = await this._createPost('draft');
+        const r = await fetch(`/api/posts/${id}/publish`, { method: 'POST' });
+        const d = await r.json();
+        if (d.success) {
+          this.notify('✅ Пост опубликован в оба канала!');
+          this.gen.variants = []; this.gen.selected = null; this.gen.topic = '';
+        } else {
+          this.notify('❌ Ошибка публикации: '+d.status, 'error');
+        }
+      } finally { this.gen.publishing = false; }
+    },
+
+    async schedulePost() {
+      if (this.gen.selected === null || !this.gen.scheduleAt) return;
+      const id = await this._createPost('draft');
+      const r = await fetch(`/api/posts/${id}/schedule`, {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ scheduled_at: this.gen.scheduleAt })
+      });
+      if (r.ok) {
+        this.notify('🗓 Пост запланирован!');
+        this.queueCount++;
+        this.gen.variants = []; this.gen.selected = null;
+        this.gen.topic = ''; this.gen.scheduleAt = '';
+      }
+    },
+
+    async saveDraft() {
+      if (this.gen.selected === null) return;
+      await this._createPost('draft');
+      this.notify('💾 Черновик сохранён');
+    },
+
+    // ── Queue / Drafts ──────────────────────────────────────────────────────
+    async loadQueue() {
+      try {
+        const r = await fetch('/api/posts?status=scheduled');
+        const d = await r.json();
+        this.queuePosts = d.posts;
+        this.queueCount = d.posts.length;
+      } catch(e) {}
+    },
+
+    async loadHist() {
+      try {
+        const r = await fetch('/api/posts?status=published');
+        this.histPosts = (await r.json()).posts;
+      } catch(e) {}
+    },
+
+    async loadDrafts() {
+      try {
+        const r = await fetch('/api/posts?status=draft');
+        this.draftPosts = (await r.json()).posts;
+      } catch(e) {}
+    },
+
+    async pubPost(id, list) {
+      const r = await fetch(`/api/posts/${id}/publish`, { method: 'POST' });
+      const d = await r.json();
+      if (d.success) { this.notify('✅ Опубликовано!'); }
+      else { this.notify('❌ Ошибка: '+d.status, 'error'); }
+      if (list==='queue') await this.loadQueue();
+      if (list==='drafts') await this.loadDrafts();
+    },
+
+    async delPost(id, list) {
+      if (!confirm('Удалить пост?')) return;
+      await fetch(`/api/posts/${id}`, { method: 'DELETE' });
+      this.notify('Удалено');
+      if (list==='queue') await this.loadQueue();
+      if (list==='drafts') await this.loadDrafts();
+    },
+
+    // ── Calendar ────────────────────────────────────────────────────────────
+    get calMonthName() {
+      const M = ['Январь','Февраль','Март','Апрель','Май','Июнь',
+                 'Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+      return M[this.calMonth.getMonth()] + ' ' + this.calMonth.getFullYear();
+    },
+
+    prevMonth() {
+      this.calMonth = new Date(this.calMonth.getFullYear(), this.calMonth.getMonth()-1, 1);
+      this.buildCal();
+    },
+    nextMonth() {
+      this.calMonth = new Date(this.calMonth.getFullYear(), this.calMonth.getMonth()+1, 1);
+      this.buildCal();
+    },
+
+    async loadCal() {
+      try {
+        const r = await fetch('/api/calendar');
+        this.calData = await r.json();
+        this.buildCal();
+      } catch(e) {}
+    },
+
+    buildCal() {
+      const Y = this.calMonth.getFullYear();
+      const M = this.calMonth.getMonth();
+      const today = new Date();
+      let first = new Date(Y, M, 1).getDay();
+      first = first === 0 ? 6 : first - 1;
+      const dim = new Date(Y, M+1, 0).getDate();
+      const pDim = new Date(Y, M, 0).getDate();
+      const days = [];
+
+      for (let i = first-1; i >= 0; i--) {
+        days.push({ d: pDim-i, cur: false, today: false, posts: [] });
+      }
+      for (let d = 1; d <= dim; d++) {
+        const ds = `${Y}-${String(M+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+        const isToday = today.getFullYear()===Y && today.getMonth()===M && today.getDate()===d;
+        days.push({ d, cur: true, today: isToday, dateStr: ds,
+          label: `${d} ${this.calMonthName}`,
+          posts: this.calData[ds] || [] });
+      }
+      const rem = 42 - days.length;
+      for (let d = 1; d <= rem; d++) {
+        days.push({ d, cur: false, today: false, posts: [] });
+      }
+      this.calDays = days;
+    },
+
+    // ── Helpers ─────────────────────────────────────────────────────────────
+    fmtDate(s) {
+      if (!s) return '';
+      try {
+        return new Date(s).toLocaleString('ru-RU', {
+          day:'2-digit', month:'2-digit', year:'numeric',
+          hour:'2-digit', minute:'2-digit'
+        });
+      } catch(e) { return s; }
+    },
+  }
+}
+</script>
+</body>
+</html>
