@@ -155,76 +155,18 @@ async def generate_image(topic: str, post_text: str, client: AsyncOpenAI) -> str
 
 _font_cache: dict = {}
 
-# Directories where we look for / store fonts
-_FONTS_DIR   = Path(__file__).parent / "fonts"
-_BOLD_FILE   = _FONTS_DIR / "Bold.ttf"
-_REG_FILE    = _FONTS_DIR / "Regular.ttf"
-
-# System-font fallback paths (Render Ubuntu / Debian)
-_SYS_BOLD = [
+# Candidate font paths in priority order — no module-level I/O, purely lazy
+_BOLD_CANDIDATES = [
+    Path(__file__).parent / "fonts" / "Bold.ttf",
     Path("/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"),
-    Path("/usr/share/fonts/truetype/open-sans/OpenSans-Bold.ttf"),
-    Path("/usr/share/fonts/opentype/open-sans/OpenSans-Bold.ttf"),
     Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
     Path("/usr/share/fonts/truetype/freefont/FreeSansBold.ttf"),
 ]
-_SYS_REG = [
+_REG_CANDIDATES = [
+    Path(__file__).parent / "fonts" / "Regular.ttf",
     Path("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"),
-    Path("/usr/share/fonts/truetype/open-sans/OpenSans-Regular.ttf"),
     Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
 ]
-
-# Remote TTF sources tried in order
-_BOLD_URLS = [
-    "https://github.com/google/fonts/raw/main/ofl/montserrat/static/Montserrat-Bold.ttf",
-    "https://github.com/JulietaUla/Montserrat/raw/master/fonts/ttf/Montserrat-Bold.ttf",
-]
-_REG_URLS = [
-    "https://github.com/google/fonts/raw/main/ofl/montserrat/static/Montserrat-Regular.ttf",
-]
-
-
-def _try_download_font(urls: list, dest: Path) -> bool:
-    """Download the first URL that works into dest. Returns True on success."""
-    import urllib.request
-    _FONTS_DIR.mkdir(exist_ok=True, parents=True)
-    for url in urls:
-        try:
-            tmp = dest.with_suffix(".tmp")
-            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-            with urllib.request.urlopen(req, timeout=20) as r:
-                data = r.read()
-            if len(data) < 10_000:
-                continue
-            tmp.write_bytes(data)
-            tmp.replace(dest)
-            logger.info(f"Font downloaded: {dest.name} ({len(data)//1024}KB) from {url}")
-            return True
-        except Exception as e:
-            logger.debug(f"Font download failed ({url}): {e}")
-    return False
-
-
-def _resolve_font_path(committed: Path, sys_paths: list, dl_urls: list) -> Path | None:
-    # 1) committed to git repo
-    if committed.exists() and committed.stat().st_size > 10_000:
-        logger.info(f"Using committed font: {committed}")
-        return committed
-    # 2) system fonts (installed via apt in build)
-    for p in sys_paths:
-        if p.exists():
-            logger.info(f"Using system font: {p}")
-            return p
-    # 3) download at runtime
-    if _try_download_font(dl_urls, committed):
-        return committed
-    logger.warning("No usable font found — PIL default will be used (text may look small)")
-    return None
-
-
-# Resolve once at module load so the first image doesn't pay the I/O cost
-_BOLD_PATH: Path | None = _resolve_font_path(_BOLD_FILE, _SYS_BOLD, _BOLD_URLS)
-_REG_PATH:  Path | None = _resolve_font_path(_REG_FILE,  _SYS_REG,  _REG_URLS)
 
 
 def _get_font(size: int, bold: bool = True):
@@ -234,20 +176,20 @@ def _get_font(size: int, bold: bool = True):
 
     from PIL import ImageFont
 
-    path = _BOLD_PATH if bold else _REG_PATH
+    candidates = _BOLD_CANDIDATES if bold else _REG_CANDIDATES
     font = None
-    if path:
+    for p in candidates:
         try:
-            font = ImageFont.truetype(str(path), size)
+            if p.exists():
+                font = ImageFont.truetype(str(p), size)
+                logger.info(f"Font loaded: {p.name} size={size}")
+                break
         except Exception as e:
-            logger.warning(f"truetype load failed ({path}): {e}")
+            logger.debug(f"Font {p}: {e}")
 
     if font is None:
-        # size= is ignored by load_default in old Pillow, but try anyway
-        try:
-            font = ImageFont.load_default(size=size)
-        except TypeError:
-            font = ImageFont.load_default()
+        logger.warning(f"No TrueType font found (bold={bold}), text will look tiny")
+        font = ImageFont.load_default()
 
     _font_cache[key] = font
     return font
@@ -278,64 +220,57 @@ def _wrap(draw, text, font, max_w):
 
 def _add_branding(filepath: Path, headline: str):
     try:
-        from PIL import Image, ImageDraw
+        from PIL import Image, ImageDraw, ImageFont
         import re
 
         img = Image.open(filepath).convert("RGB")
         W, H = img.size
 
-        logger.info(f"_add_branding: bold_font={_BOLD_PATH}, reg_font={_REG_PATH}")
-
-        # ── Font sizes ────────────────────────────────────────────────────
-        title_sz = max(72, W // 12)    # very large — fills ~30% width per word
+        title_sz = max(72, W // 12)
         sub_sz   = max(24, W // 38)
         brand_sz = max(32, W // 28)
         font_t = _get_font(title_sz, bold=True)
         font_s = _get_font(sub_sz,   bold=False)
         font_b = _get_font(brand_sz, bold=True)
 
-        # ── Extract first sentence → headline ─────────────────────────────
+        is_tt = isinstance(font_t, ImageFont.FreeTypeFont)
+        logger.info(f"_add_branding: {W}x{H}, TrueType={is_tt}, font={font_t}")
+
         clean = re.sub(r"<[^>]+>", "", headline).strip()
         first = re.split(r"[.!?\n]", clean)[0].strip()
         title = first.upper()
 
-        # ── Dark gradient: only bottom 60%, photo stays clear on top ─────
+        # Dark gradient bottom 62%
         grad = Image.new("RGBA", (W, H), (0, 0, 0, 0))
         gd   = ImageDraw.Draw(grad)
         g0   = int(H * 0.38)
         for y in range(g0, H):
             t = (y - g0) / (H - g0)
-            a = int(230 * (t ** 0.45))   # aggressive curve → dark quickly
+            a = int(230 * (t ** 0.45))
             gd.line([(0, y), (W, y)], fill=(3, 10, 6, a))
         img = Image.alpha_composite(img.convert("RGBA"), grad).convert("RGB")
         draw = ImageDraw.Draw(img)
 
-        # ── Layout: anchor everything from the bottom up ──────────────────
-        px    = int(W * 0.07)           # left margin
+        px    = int(W * 0.07)
         max_w = W - px * 2
 
-        # SEVEN-X — bottom-left, emerald
+        # SEVEN-X bottom-left, emerald
         brand_y = H - int(H * 0.055) - brand_sz
         draw.text((px, brand_y), "SEVEN-X", fill=(82, 183, 136), font=font_b)
 
-        # Thin horizontal rule above SEVEN-X
+        # Emerald rule above SEVEN-X
         rule_y = brand_y - int(H * 0.02)
         draw.rectangle(
             [(px, rule_y), (W - px, rule_y + max(3, int(H * 0.003)))],
             fill=(82, 183, 136),
         )
 
-        # Contact line above rule — left-aligned
+        # Contact — left, small, gray
         sub_y = rule_y - int(H * 0.015) - sub_sz
-        draw.text(
-            (px, sub_y),
-            "seven-x.ru  ·  Артём: +7 967 202-55-54",
-            fill=(170, 170, 170),
-            font=font_s,
-            anchor="la",
-        )
+        draw.text((px, sub_y), "seven-x.ru  ·  Артём: +7 967 202-55-54",
+                  fill=(170, 170, 170), font=font_s)
 
-        # Headline — left-aligned, white, ALL CAPS, hero size
+        # Headline — white ALL CAPS, left-aligned
         lines   = _wrap(draw, title, font_t, max_w)[:3]
         lh      = int(title_sz * 1.15)
         total_h = len(lines) * lh
@@ -343,20 +278,17 @@ def _add_branding(filepath: Path, headline: str):
 
         for i, line in enumerate(lines):
             y = title_y + i * lh
-            # Black stroke for contrast on any background
-            draw.text(
-                (px, y), line,
-                fill=(255, 255, 255),
-                font=font_t,
-                anchor="la",
-                stroke_width=max(3, title_sz // 20),
-                stroke_fill=(0, 0, 0),
-            )
+            if is_tt:
+                draw.text((px, y), line, fill=(255, 255, 255), font=font_t,
+                          stroke_width=max(3, title_sz // 20), stroke_fill=(0, 0, 0))
+            else:
+                draw.text((px + 3, y + 3), line, fill=(0, 0, 0), font=font_t)
+                draw.text((px, y), line, fill=(255, 255, 255), font=font_t)
 
         img.save(filepath, "JPEG", quality=93)
-        logger.info(f"_add_branding done: title='{title[:40]}' lines={len(lines)}")
+        logger.info(f"_add_branding OK: '{title[:35]}', lines={len(lines)}")
     except Exception as e:
-        logger.warning(f"Branding overlay failed: {e}")
+        logger.error(f"Branding overlay failed: {e}", exc_info=True)
 
 
 async def generate_image_pollinations(topic: str, post_text: str) -> str:
