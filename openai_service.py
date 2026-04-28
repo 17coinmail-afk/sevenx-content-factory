@@ -137,15 +137,17 @@ async def generate_text_variants(
     currency_text: str,
     client: AsyncOpenAI,
     model: str = "gpt-4o",
+    contact_info: str = "",
 ) -> list[dict]:
     style_prompt = STYLE_PROMPTS.get(style, STYLE_PROMPTS["expert"])
     currency_block = f"\n\nВключи в пост актуальные курсы валют:\n{currency_text}" if currency_text else ""
+    contact_block = f"\n\nКонтакт для CTA в посте: {contact_info}" if contact_info else ""
 
     system = brand_voice.strip() if brand_voice.strip() else SYSTEM_PROMPT
 
     user_prompt = f"""Напиши 3 Telegram-поста на тему: «{topic}»
 
-{style_prompt}{currency_block}
+{style_prompt}{currency_block}{contact_block}
 
 Требования к трём вариантам:
 — Вариант 1: начни с неожиданного факта или провокационного вопроса
@@ -265,7 +267,7 @@ def _wrap(draw, text, font, max_w):
     return lines or [text]
 
 
-def _add_branding(filepath: Path, headline: str):
+def _add_branding(filepath: Path, headline: str, contact_info: str = ""):
     try:
         from PIL import Image, ImageDraw, ImageFont
         import re
@@ -336,8 +338,8 @@ def _add_branding(filepath: Path, headline: str):
         y += int(pad * 0.5)
 
         # Contact line: gray, small
-        draw.text((px, y), "seven-x.ru  ·  Артём: +7 967 202-55-54",
-                  fill=(160, 160, 160), font=font_s)
+        contact_line = contact_info.strip() if contact_info.strip() else "seven-x.ru  ·  Артём: +7 967 202-55-54"
+        draw.text((px, y), contact_line, fill=(160, 160, 160), font=font_s)
         y += sub_h
 
         # SEVEN-X: emerald, medium
@@ -349,7 +351,7 @@ def _add_branding(filepath: Path, headline: str):
         logger.error(f"Branding failed: {e}", exc_info=True)
 
 
-async def generate_image_pollinations(topic: str, post_text: str) -> str:
+async def generate_image_pollinations(topic: str, post_text: str, contact_info: str = "") -> str:
     import random
     prompt  = _build_image_prompt(topic)
     encoded = urllib.parse.quote(prompt)
@@ -370,5 +372,5 @@ async def generate_image_pollinations(topic: str, post_text: str) -> str:
             raise ValueError(f"Pollinations returned too-small response ({len(resp.content)} bytes)")
         filepath.write_bytes(resp.content)
 
-    _add_branding(filepath, post_text or topic)
+    _add_branding(filepath, post_text or topic, contact_info=contact_info)
     return f"/images/{filename}"

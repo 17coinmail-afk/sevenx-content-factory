@@ -108,6 +108,7 @@ async def auto_generate_and_publish():
     base_url = settings.get("ai_base_url", "").strip() or None
     model = settings.get("ai_model", "").strip() or DEFAULT_MODELS.get(base_url or "", "gpt-4o")
     brand_voice = settings.get("brand_voice", "")
+    contact_info = settings.get("contact_info", "")
     topic = random.choice(PRESET_TOPICS)
 
     kwargs = {"api_key": api_key}
@@ -116,7 +117,7 @@ async def auto_generate_and_publish():
     client = AsyncOpenAI(**kwargs)
 
     try:
-        variants = await generate_text_variants(topic, "expert", brand_voice, "", client, model)
+        variants = await generate_text_variants(topic, "expert", brand_voice, "", client, model, contact_info=contact_info)
     except Exception as e:
         logger.error(f"Auto-generate text error: {e}")
         return
@@ -130,7 +131,7 @@ async def auto_generate_and_publish():
     try:
         from openai_service import generate_image_pollinations
         settings = db.get_settings()
-        image_path = await generate_image_pollinations(topic, v["text"])
+        image_path = await generate_image_pollinations(topic, v["text"], contact_info=contact_info)
     except Exception as e:
         logger.warning(f"Auto-generate image failed (posting without image): {e}")
 
@@ -213,6 +214,7 @@ class SettingsIn(BaseModel):
     auto_post_times: Optional[str] = None
     auto_generate_enabled: Optional[str] = None
     brand_voice: Optional[str] = None
+    contact_info: Optional[str] = None
 
 
 @app.put("/api/settings")
@@ -289,11 +291,13 @@ async def generate(req: GenerateIn):
         currency_text = format_rates_for_post(rates)
 
     brand_voice = req.brand_voice or s.get("brand_voice", "")
+    contact_info = s.get("contact_info", "")
 
     try:
         variants = await generate_text_variants(
             topic=req.topic, style=req.style, brand_voice=brand_voice,
             currency_text=currency_text, client=client, model=model,
+            contact_info=contact_info,
         )
         return {"variants": variants}
     except Exception as e:
@@ -313,9 +317,10 @@ async def generate_image(req: GenerateImageIn):
     s = db.get_settings()
     image_provider = s.get("image_provider", "pollinations")
 
+    contact_info = s.get("contact_info", "")
     try:
         if image_provider == "pollinations":
-            url = await generate_image_pollinations(req.topic, req.post_text)
+            url = await generate_image_pollinations(req.topic, req.post_text, contact_info=contact_info)
         else:
             client, _ = _make_ai_client(s)
             url = await gen_img(req.topic, req.post_text, client)

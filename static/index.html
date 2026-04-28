@@ -556,6 +556,15 @@
         </div>
       </div>
 
+      <!-- Contact info -->
+      <div class="bg-[#0f2018] border border-[#1a3328] rounded-2xl p-5 mb-4">
+        <h2 class="text-sm font-semibold mb-2">📞 Контакт для постов и картинок</h2>
+        <p class="text-xs text-[#3d6b52] mb-3">Вписывается в текст поста (как CTA) и на изображение.</p>
+        <input x-model="sf.contact_info"
+               :placeholder="settings.contact_info || 'Артём: +7 967 202-55-54'"
+               class="w-full bg-[#071410] border border-[#1a3328] text-white rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-[#52b788] transition-colors"/>
+      </div>
+
       <!-- Brand voice -->
       <div class="bg-[#0f2018] border border-[#1a3328] rounded-2xl p-5 mb-4">
         <h2 class="text-sm font-semibold mb-2">🎙 Голос бренда</h2>
@@ -638,6 +647,7 @@ function app() {
       channel_1_id: '', channel_2_id: '',
       ai_base_url: '', ai_model: '', image_provider: 'pollinations',
       auto_post_enabled: 'false', auto_generate_enabled: 'false', brand_voice: '',
+      contact_info: '',
       saving: false, autopilotLoading: false,
     },
     autoTimes: ['10:00', '19:00'],
@@ -688,6 +698,7 @@ function app() {
         this.sf.auto_post_enabled = this.settings.auto_post_enabled || 'false';
         this.sf.auto_generate_enabled = this.settings.auto_generate_enabled || 'false';
         this.sf.brand_voice = this.settings.brand_voice || '';
+        this.sf.contact_info = this.settings.contact_info || '';
         try { this.autoTimes = JSON.parse(this.settings.auto_post_times || '["10:00","19:00"]'); } catch(e) {}
       } catch(e) {}
     },
@@ -716,6 +727,7 @@ function app() {
           auto_generate_enabled: this.sf.auto_generate_enabled,
           auto_post_times: JSON.stringify(this.autoTimes),
           brand_voice: this.sf.brand_voice,
+          contact_info: this.sf.contact_info,
         };
         if (this.sf.openai_api_key) body.openai_api_key = this.sf.openai_api_key;
         if (this.sf.telegram_bot_token) body.telegram_bot_token = this.sf.telegram_bot_token;
