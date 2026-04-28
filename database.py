@@ -133,6 +133,7 @@ def init_db():
             "auto_post_times": json.dumps(["10:00", "19:00"]),
             "brand_voice": DEFAULT_BRAND_VOICE,
             "contact_info": "Артём: +7 967 202-55-54",
+            "pexels_api_key": "",
         }
 
         for key, value in defaults.items():

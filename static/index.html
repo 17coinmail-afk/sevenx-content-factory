@@ -449,20 +449,32 @@
 
       <!-- Image Provider -->
       <div class="bg-[#0f2018] border border-[#1a3328] rounded-2xl p-5 mb-4">
-        <h2 class="text-sm font-semibold mb-3">🖼 Генерация картинок</h2>
-        <div class="flex gap-2">
-          <button @click="sf.image_provider='pollinations'"
-                  :class="sf.image_provider!=='openai'?'bg-[#2d6a4f] text-white border-[#2d6a4f]':'bg-[#071410] text-[#5a8a6a] border-[#1a3328] hover:border-[#2d6a4f]'"
+        <h2 class="text-sm font-semibold mb-3">🖼 Картинки для постов</h2>
+        <div class="flex gap-2 mb-3">
+          <button @click="sf.image_provider='pexels'"
+                  :class="sf.image_provider==='pexels'?'bg-[#2d6a4f] text-white border-[#2d6a4f]':'bg-[#071410] text-[#5a8a6a] border-[#1a3328] hover:border-[#2d6a4f]'"
                   class="flex-1 border text-xs py-3 rounded-xl transition-all text-center">
-            <div>🆓 Pollinations.ai</div>
-            <div class="text-green-400 text-[10px] mt-0.5">бесплатно, без ключа</div>
+            <div>📷 Pexels</div>
+            <div class="text-green-400 text-[10px] mt-0.5">фото из интернета</div>
+          </button>
+          <button @click="sf.image_provider='pollinations'"
+                  :class="sf.image_provider==='pollinations'?'bg-[#2d6a4f] text-white border-[#2d6a4f]':'bg-[#071410] text-[#5a8a6a] border-[#1a3328] hover:border-[#2d6a4f]'"
+                  class="flex-1 border text-xs py-3 rounded-xl transition-all text-center">
+            <div>🆓 Pollinations</div>
+            <div class="text-[#5a8a6a] text-[10px] mt-0.5">AI-генерация</div>
           </button>
           <button @click="sf.image_provider='openai'"
                   :class="sf.image_provider==='openai'?'bg-[#2d6a4f] text-white border-[#2d6a4f]':'bg-[#071410] text-[#5a8a6a] border-[#1a3328] hover:border-[#2d6a4f]'"
                   class="flex-1 border text-xs py-3 rounded-xl transition-all text-center">
             <div>DALL-E 3</div>
-            <div class="text-[#5a8a6a] text-[10px] mt-0.5">требует OpenAI ключ</div>
+            <div class="text-[#5a8a6a] text-[10px] mt-0.5">OpenAI ключ</div>
           </button>
+        </div>
+        <div x-show="sf.image_provider==='pexels'">
+          <label class="block text-xs text-[#5a8a6a] mb-1">Pexels API Key <a href="https://www.pexels.com/api/" target="_blank" class="text-[#52b788] hover:underline">→ получить бесплатно</a></label>
+          <input x-model="sf.pexels_api_key" type="password"
+                 :placeholder="settings.pexels_api_key_masked||'вставьте ключ от pexels.com/api'"
+                 class="w-full bg-[#071410] border border-[#1a3328] text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-[#52b788] transition-colors placeholder-[#2d5040]">
         </div>
       </div>
 
@@ -646,6 +658,7 @@ function app() {
       openai_api_key: '', telegram_bot_token: '',
       channel_1_id: '', channel_2_id: '',
       ai_base_url: '', ai_model: '', image_provider: 'pollinations',
+      pexels_api_key: '',
       auto_post_enabled: 'false', auto_generate_enabled: 'false', brand_voice: '',
       contact_info: '',
       saving: false, autopilotLoading: false,
@@ -695,6 +708,7 @@ function app() {
         this.sf.ai_base_url = this.settings.ai_base_url || '';
         this.sf.ai_model = this.settings.ai_model || '';
         this.sf.image_provider = this.settings.image_provider || 'pollinations';
+        this.sf.pexels_api_key = '';
         this.sf.auto_post_enabled = this.settings.auto_post_enabled || 'false';
         this.sf.auto_generate_enabled = this.settings.auto_generate_enabled || 'false';
         this.sf.brand_voice = this.settings.brand_voice || '';
@@ -731,6 +745,7 @@ function app() {
         };
         if (this.sf.openai_api_key) body.openai_api_key = this.sf.openai_api_key;
         if (this.sf.telegram_bot_token) body.telegram_bot_token = this.sf.telegram_bot_token;
+        if (this.sf.pexels_api_key) body.pexels_api_key = this.sf.pexels_api_key;
 
         const r = await fetch('/api/settings', {
           method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body)

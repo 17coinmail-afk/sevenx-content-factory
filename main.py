@@ -95,20 +95,21 @@ async def publish_post(post_id: int):
     logger.info(f"Post {post_id} → {'published' if success else 'failed'} | results: {results}")
 
 
-async def auto_generate_and_publish():
+async def auto_generate_and_publish() -> int:
     from openai import AsyncOpenAI
     from openai_service import generate_text_variants, DEFAULT_MODELS
 
     settings = db.get_settings()
     api_key = os.getenv("OPENAI_API_KEY") or settings.get("openai_api_key", "")
     if not api_key:
-        logger.warning("Auto-generate: no API key configured")
-        return
+        raise ValueError("AI API ключ не настроен — добавьте его в Настройках")
 
     base_url = settings.get("ai_base_url", "").strip() or None
     model = settings.get("ai_model", "").strip() or DEFAULT_MODELS.get(base_url or "", "gpt-4o")
     brand_voice = settings.get("brand_voice", "")
     contact_info = settings.get("contact_info", "")
+    pexels_key = settings.get("pexels_api_key", "").strip()
+    image_provider = settings.get("image_provider", "pollinations")
     topic = random.choice(PRESET_TOPICS)
 
     kwargs = {"api_key": api_key}
@@ -116,22 +117,20 @@ async def auto_generate_and_publish():
         kwargs["base_url"] = base_url
     client = AsyncOpenAI(**kwargs)
 
-    try:
-        variants = await generate_text_variants(topic, "expert", brand_voice, "", client, model, contact_info=contact_info)
-    except Exception as e:
-        logger.error(f"Auto-generate text error: {e}")
-        return
-
+    variants = await generate_text_variants(topic, "expert", brand_voice, "", client, model, contact_info=contact_info)
     if not variants:
-        return
+        raise ValueError("AI не вернул варианты текста")
 
     v = variants[0]
 
     image_path = ""
     try:
-        from openai_service import generate_image_pollinations
-        settings = db.get_settings()
-        image_path = await generate_image_pollinations(topic, v["text"], contact_info=contact_info)
+        if image_provider == "pexels" and pexels_key:
+            from openai_service import fetch_image_pexels
+            image_path = await fetch_image_pexels(topic, pexels_key, contact_info=contact_info)
+        else:
+            from openai_service import generate_image_pollinations
+            image_path = await generate_image_pollinations(topic, v["text"], contact_info=contact_info)
     except Exception as e:
         logger.warning(f"Auto-generate image failed (posting without image): {e}")
 
@@ -142,6 +141,7 @@ async def auto_generate_and_publish():
     )
     logger.info(f"Auto-generated post {post_id}: {topic}")
     await publish_post(post_id)
+    return post_id
 
 
 async def auto_post():
@@ -199,6 +199,9 @@ async def get_settings():
     if s.get("telegram_bot_token"):
         t = s["telegram_bot_token"]
         s["telegram_bot_token_masked"] = t[:8] + "..." if len(t) > 8 else "***"
+    if s.get("pexels_api_key"):
+        p = s["pexels_api_key"]
+        s["pexels_api_key_masked"] = p[:6] + "..." if len(p) > 6 else "***"
     return s
 
 
@@ -207,6 +210,7 @@ class SettingsIn(BaseModel):
     ai_base_url: Optional[str] = None
     ai_model: Optional[str] = None
     image_provider: Optional[str] = None
+    pexels_api_key: Optional[str] = None
     telegram_bot_token: Optional[str] = None
     channel_1_id: Optional[str] = None
     channel_2_id: Optional[str] = None
@@ -312,18 +316,21 @@ class GenerateImageIn(BaseModel):
 
 @app.post("/api/generate/image")
 async def generate_image(req: GenerateImageIn):
-    from openai_service import generate_image as gen_img, generate_image_pollinations
+    from openai_service import generate_image as gen_img, generate_image_pollinations, fetch_image_pexels
 
     s = db.get_settings()
     image_provider = s.get("image_provider", "pollinations")
-
     contact_info = s.get("contact_info", "")
+    pexels_key = s.get("pexels_api_key", "").strip()
+
     try:
-        if image_provider == "pollinations":
-            url = await generate_image_pollinations(req.topic, req.post_text, contact_info=contact_info)
-        else:
+        if image_provider == "pexels" and pexels_key:
+            url = await fetch_image_pexels(req.topic, pexels_key, contact_info=contact_info)
+        elif image_provider == "openai":
             client, _ = _make_ai_client(s)
             url = await gen_img(req.topic, req.post_text, client)
+        else:
+            url = await generate_image_pollinations(req.topic, req.post_text, contact_info=contact_info)
         return {"image_url": url}
     except Exception as e:
         logger.error(f"Image error: {e}")
@@ -434,16 +441,19 @@ async def trigger_autopilot():
     settings = db.get_settings()
     bot_token = os.getenv("TELEGRAM_BOT_TOKEN") or settings.get("telegram_bot_token", "")
     ch1 = os.getenv("CHANNEL_1_ID") or settings.get("channel_1_id", "")
-    api_key = os.getenv("OPENAI_API_KEY") or settings.get("openai_api_key", "")
 
     if not bot_token or not ch1:
         raise HTTPException(400, "Telegram не настроен (нет токена или канала)")
-    if not api_key:
-        raise HTTPException(400, "AI API key не настроен")
 
     try:
-        await auto_generate_and_publish()
-        return {"success": True, "message": "Пост сгенерирован и опубликован"}
+        post_id = await auto_generate_and_publish()
     except Exception as e:
         logger.error(f"Autopilot trigger error: {e}")
         raise HTTPException(500, str(e))
+
+    post = db.get_post(post_id)
+    status = post["status"] if post else "unknown"
+    if status == "published":
+        return {"success": True, "message": "Пост опубликован в Telegram ✓"}
+    else:
+        raise HTTPException(500, f"Пост создан (id={post_id}), но не отправлен в Telegram (статус: {status}). Проверьте токен бота и ID канала.")

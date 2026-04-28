@@ -81,6 +81,23 @@ SYSTEM_PROMPT = """\
 - Каждый из 3 вариантов — принципиально разная подача, разная структура, разный тон
 - Пиши на русском, без канцелярита"""
 
+_PEXELS_QUERIES = {
+    "китай":   "china business trade finance",
+    "юань":    "chinese yuan currency money",
+    "дирхам":  "dubai UAE business gold luxury",
+    "санкц":   "international trade business global",
+    "ндс":     "tax refund money finance",
+    "alipay":  "mobile payment technology digital",
+    "wechat":  "digital payment mobile",
+    "крипт":   "cryptocurrency bitcoin blockchain",
+    "валют":   "currency exchange money international",
+    "вэд":     "cargo shipping containers international",
+    "выручк":  "business profit revenue growth",
+    "агент":   "business partnership handshake contract",
+    "платёж":  "bank transfer payment wire",
+    "скорост": "business speed fast delivery",
+}
+
 _IMAGE_STYLES = [
     "cinematic photorealistic, dramatic lighting",
     "sleek 3D render, dark studio background",
@@ -349,6 +366,47 @@ def _add_branding(filepath: Path, headline: str, contact_info: str = ""):
         logger.info(f"Branding OK: '{title[:40]}' {len(lines)} lines, panel_h={panel_h}")
     except Exception as e:
         logger.error(f"Branding failed: {e}", exc_info=True)
+
+
+async def fetch_image_pexels(topic: str, api_key: str, contact_info: str = "") -> str:
+    import random
+    topic_lower = topic.lower()
+    query = "international business finance"
+    for key, q in _PEXELS_QUERIES.items():
+        if key in topic_lower:
+            query = q
+            break
+
+    logger.info(f"Pexels search: '{query}' for topic '{topic[:60]}'")
+    headers = {"Authorization": api_key}
+    search_url = (
+        f"https://api.pexels.com/v1/search"
+        f"?query={urllib.parse.quote(query)}&per_page=10&orientation=square"
+    )
+
+    async with httpx.AsyncClient(timeout=30) as http:
+        resp = await http.get(search_url, headers=headers)
+        resp.raise_for_status()
+        data = resp.json()
+
+    photos = data.get("photos", [])
+    if not photos:
+        raise ValueError(f"Pexels: no photos for '{query}'")
+
+    photo = random.choice(photos[:min(6, len(photos))])
+    img_url = photo["src"]["large"]
+
+    filename = f"{uuid.uuid4()}.jpg"
+    filepath = IMAGES_DIR / filename
+
+    async with httpx.AsyncClient(timeout=60) as http:
+        img_resp = await http.get(img_url)
+        img_resp.raise_for_status()
+        filepath.write_bytes(img_resp.content)
+
+    _add_branding(filepath, topic, contact_info=contact_info)
+    logger.info(f"Pexels image saved: {filename}")
+    return f"/images/{filename}"
 
 
 async def generate_image_pollinations(topic: str, post_text: str, contact_info: str = "") -> str:
