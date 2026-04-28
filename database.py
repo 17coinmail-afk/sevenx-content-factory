@@ -86,6 +86,25 @@ def init_db():
             "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)"
         )
 
+        # Migrate: add columns that may be missing from old tables
+        extra_cols = [
+            ("topic", "TEXT"),
+            ("style", "TEXT"),
+            ("hashtags", "TEXT"),
+            ("scheduled_at", "TEXT"),
+            ("published_at", "TEXT"),
+            ("message_id_1", "TEXT"),
+            ("message_id_2", "TEXT"),
+        ]
+        for col, coltype in extra_cols:
+            try:
+                if IS_PG:
+                    cur.execute(f"ALTER TABLE posts ADD COLUMN IF NOT EXISTS {col} {coltype}")
+                else:
+                    cur.execute(f"ALTER TABLE posts ADD COLUMN {col} {coltype}")
+            except Exception:
+                pass
+
         defaults = {
             "telegram_bot_token": "",
             "channel_1_id": "",
