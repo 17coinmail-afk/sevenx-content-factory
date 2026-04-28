@@ -95,6 +95,7 @@ def init_db():
             "ai_model": "",
             "image_provider": "pollinations",
             "auto_post_enabled": "false",
+            "auto_generate_enabled": "false",
             "auto_post_times": json.dumps(["10:00", "19:00"]),
             "brand_voice": DEFAULT_BRAND_VOICE,
         }

@@ -1,5 +1,6 @@
 import os
 import json
+import random
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -26,8 +27,33 @@ IMAGES_DIR = Path(os.getenv("IMAGES_DIR", "images"))
 IMAGES_DIR.mkdir(exist_ok=True, parents=True)
 Path("static").mkdir(exist_ok=True)
 
+PRESET_TOPICS = [
+    "Как платить за товары из Китая в 2025 году",
+    "Почему переводы в юанях выгоднее долларов",
+    "Работа с санкционными товарами: что нужно знать",
+    "Как вернуть НДС из Китая рублями",
+    "Скорость платежей Seven-X: рубли утром — поставка вечером",
+    "Платежи через Alipay и WeChat для бизнеса",
+    "Выкуп валютной выручки с доплатой 1–3%",
+    "ВЭД без российского следа: как это работает",
+    "Международные платежи в AED (дирхам ОАЭ)",
+    "Агентская схема или договор поставки: что выбрать",
+    "40+ компаний-плательщиков по всему миру",
+    "Как Seven-X решает проблему платежей в санкционных условиях",
+]
+
 
 # ── Core publish logic ────────────────────────────────────────────────────────
+
+def _resolve_image_path(image_path: str) -> str:
+    if not image_path:
+        return ""
+    if image_path.startswith("/images/"):
+        return str(IMAGES_DIR / image_path[8:])
+    if image_path.startswith("/"):
+        return image_path[1:]
+    return image_path
+
 
 async def publish_post(post_id: int):
     post = db.get_post(post_id)
@@ -45,9 +71,7 @@ async def publish_post(post_id: int):
         db.update_post(post_id, status="failed")
         return
 
-    image_path = post.get("image_path", "")
-    if image_path and image_path.startswith("/"):
-        image_path = image_path[1:]
+    image_path = _resolve_image_path(post.get("image_path", ""))
 
     results = await send_post(
         bot_token=bot_token,
@@ -68,13 +92,57 @@ async def publish_post(post_id: int):
         updates["message_id_2"] = str(results[channels[1]].get("message_id", ""))
 
     db.update_post(post_id, **updates)
-    logger.info(f"Post {post_id} → {'published' if success else 'failed'}")
+    logger.info(f"Post {post_id} → {'published' if success else 'failed'} | results: {results}")
+
+
+async def auto_generate_and_publish():
+    from openai import AsyncOpenAI
+    from openai_service import generate_text_variants, DEFAULT_MODELS
+
+    settings = db.get_settings()
+    api_key = os.getenv("OPENAI_API_KEY") or settings.get("openai_api_key", "")
+    if not api_key:
+        logger.warning("Auto-generate: no API key configured")
+        return
+
+    base_url = settings.get("ai_base_url", "").strip() or None
+    model = settings.get("ai_model", "").strip() or DEFAULT_MODELS.get(base_url or "", "gpt-4o")
+    brand_voice = settings.get("brand_voice", "")
+    topic = random.choice(PRESET_TOPICS)
+
+    kwargs = {"api_key": api_key}
+    if base_url:
+        kwargs["base_url"] = base_url
+    client = AsyncOpenAI(**kwargs)
+
+    try:
+        variants = await generate_text_variants(topic, "expert", brand_voice, "", client, model)
+    except Exception as e:
+        logger.error(f"Auto-generate text error: {e}")
+        return
+
+    if not variants:
+        return
+
+    v = variants[0]
+    post_id = db.create_post(
+        topic=topic, text=v["text"], image_path="",
+        style="expert", hashtags=v.get("hashtags", ""),
+        status="draft", scheduled_at=None,
+    )
+    logger.info(f"Auto-generated post {post_id}: {topic}")
+    await publish_post(post_id)
 
 
 async def auto_post():
     posts = db.get_scheduled_posts()
     if posts:
         await publish_post(posts[0]["id"])
+        return
+
+    settings = db.get_settings()
+    if settings.get("auto_generate_enabled", "false") == "true":
+        await auto_generate_and_publish()
 
 
 # ── Lifespan ──────────────────────────────────────────────────────────────────
@@ -134,6 +202,7 @@ class SettingsIn(BaseModel):
     channel_2_id: Optional[str] = None
     auto_post_enabled: Optional[str] = None
     auto_post_times: Optional[str] = None
+    auto_generate_enabled: Optional[str] = None
     brand_voice: Optional[str] = None
 
 
@@ -179,7 +248,6 @@ class GenerateIn(BaseModel):
 
 def _make_ai_client(s: dict):
     from openai import AsyncOpenAI
-    from openai_service import DEFAULT_MODELS
     api_key = os.getenv("OPENAI_API_KEY") or s.get("openai_api_key", "")
     base_url = s.get("ai_base_url", "").strip() or None
     if not api_key:
@@ -215,12 +283,8 @@ async def generate(req: GenerateIn):
 
     try:
         variants = await generate_text_variants(
-            topic=req.topic,
-            style=req.style,
-            brand_voice=brand_voice,
-            currency_text=currency_text,
-            client=client,
-            model=model,
+            topic=req.topic, style=req.style, brand_voice=brand_voice,
+            currency_text=currency_text, client=client, model=model,
         )
         return {"variants": variants}
     except Exception as e:
@@ -280,12 +344,8 @@ async def get_post(post_id: int):
 @app.post("/api/posts")
 async def create_post(req: PostIn):
     pid = db.create_post(
-        topic=req.topic,
-        text=req.text,
-        image_path=req.image_path,
-        style=req.style,
-        hashtags=req.hashtags,
-        status=req.status,
+        topic=req.topic, text=req.text, image_path=req.image_path,
+        style=req.style, hashtags=req.hashtags, status=req.status,
         scheduled_at=req.scheduled_at,
     )
     return {"id": pid, "success": True}
@@ -296,13 +356,8 @@ async def update_post(post_id: int, req: PostIn):
     if not db.get_post(post_id):
         raise HTTPException(404, "Not found")
     db.update_post(
-        post_id,
-        text=req.text,
-        image_path=req.image_path,
-        style=req.style,
-        hashtags=req.hashtags,
-        status=req.status,
-        scheduled_at=req.scheduled_at,
+        post_id, text=req.text, image_path=req.image_path, style=req.style,
+        hashtags=req.hashtags, status=req.status, scheduled_at=req.scheduled_at,
     )
     return {"success": True}
 
@@ -356,3 +411,25 @@ async def calendar():
             "topic": post.get("topic", ""),
         })
     return result
+
+
+# ── Autopilot test trigger ────────────────────────────────────────────────────
+
+@app.post("/api/autopilot/trigger")
+async def trigger_autopilot():
+    settings = db.get_settings()
+    bot_token = os.getenv("TELEGRAM_BOT_TOKEN") or settings.get("telegram_bot_token", "")
+    ch1 = os.getenv("CHANNEL_1_ID") or settings.get("channel_1_id", "")
+    api_key = os.getenv("OPENAI_API_KEY") or settings.get("openai_api_key", "")
+
+    if not bot_token or not ch1:
+        raise HTTPException(400, "Telegram не настроен (нет токена или канала)")
+    if not api_key:
+        raise HTTPException(400, "AI API key не настроен")
+
+    try:
+        await auto_generate_and_publish()
+        return {"success": True, "message": "Пост сгенерирован и опубликован"}
+    except Exception as e:
+        logger.error(f"Autopilot trigger error: {e}")
+        raise HTTPException(500, str(e))
