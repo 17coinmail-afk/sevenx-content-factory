@@ -106,6 +106,14 @@ def init_db():
             except Exception:
                 pass
 
+        if IS_PG:
+            # Drop NOT NULL on legacy columns from other apps sharing this DB
+            for col in ("user_id", "channel_id", "message_text", "file_id"):
+                try:
+                    cur.execute(f"ALTER TABLE posts ALTER COLUMN {col} DROP NOT NULL")
+                except Exception:
+                    pass
+
         defaults = {
             "telegram_bot_token": "",
             "channel_1_id": "",
