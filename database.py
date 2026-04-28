@@ -98,21 +98,27 @@ def init_db():
             ("message_id_2", "TEXT"),
         ]
         for col, coltype in extra_cols:
-            try:
-                if IS_PG:
-                    cur.execute(f"ALTER TABLE posts ADD COLUMN IF NOT EXISTS {col} {coltype}")
-                else:
-                    cur.execute(f"ALTER TABLE posts ADD COLUMN {col} {coltype}")
-            except Exception:
-                pass
-
-        if IS_PG:
-            # Drop NOT NULL on legacy columns from other apps sharing this DB
-            for col in ("user_id", "channel_id", "message_text", "file_id"):
+            if IS_PG:
+                cur.execute("SAVEPOINT _sp")
                 try:
-                    cur.execute(f"ALTER TABLE posts ALTER COLUMN {col} DROP NOT NULL")
+                    cur.execute(f"ALTER TABLE posts ADD COLUMN IF NOT EXISTS {col} {coltype}")
+                    cur.execute("RELEASE SAVEPOINT _sp")
+                except Exception:
+                    cur.execute("ROLLBACK TO SAVEPOINT _sp")
+            else:
+                try:
+                    cur.execute(f"ALTER TABLE posts ADD COLUMN {col} {coltype}")
                 except Exception:
                     pass
+
+        if IS_PG:
+            for col in ("user_id", "channel_id", "message_text", "file_id"):
+                cur.execute("SAVEPOINT _sp")
+                try:
+                    cur.execute(f"ALTER TABLE posts ALTER COLUMN {col} DROP NOT NULL")
+                    cur.execute("RELEASE SAVEPOINT _sp")
+                except Exception:
+                    cur.execute("ROLLBACK TO SAVEPOINT _sp")
 
         defaults = {
             "telegram_bot_token": "",
