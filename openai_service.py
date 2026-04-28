@@ -153,112 +153,131 @@ async def generate_image(topic: str, post_text: str, client: AsyncOpenAI) -> str
     return f"/images/{filename}"
 
 
-def _text_width(draw, text, font):
+_font_cache: dict = {}
+
+
+def _get_font(size: int):
+    from PIL import ImageFont
+
+    if size in _font_cache:
+        return _font_cache[size]
+
+    font_file = IMAGES_DIR / "MontserratBold.ttf"
+    if not font_file.exists():
+        try:
+            import urllib.request
+            urllib.request.urlretrieve(
+                "https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/montserrat/static/Montserrat-Bold.ttf",
+                str(font_file),
+            )
+        except Exception:
+            pass
+
+    font = None
+    if font_file.exists():
+        try:
+            font = ImageFont.truetype(str(font_file), size)
+        except Exception:
+            pass
+
+    if font is None:
+        for fp in [
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        ]:
+            if Path(fp).exists():
+                try:
+                    font = ImageFont.truetype(fp, size)
+                    break
+                except Exception:
+                    pass
+
+    if font is None:
+        font = ImageFont.load_default()
+
+    _font_cache[size] = font
+    return font
+
+
+def _tw(draw, text, font):
     try:
-        return draw.textlength(text, font=font)
+        return int(draw.textlength(text, font=font))
     except AttributeError:
         return draw.textsize(text, font=font)[0]
 
 
-def _wrap_text(draw, text, font, max_width):
+def _wrap(draw, text, font, max_w):
     words = text.split()
-    lines, current = [], ""
-    for word in words:
-        candidate = f"{current} {word}".strip()
-        if _text_width(draw, candidate, font) <= max_width:
-            current = candidate
+    lines, cur = [], ""
+    for w in words:
+        cand = f"{cur} {w}".strip()
+        if _tw(draw, cand, font) <= max_w:
+            cur = cand
         else:
-            if current:
-                lines.append(current)
-            current = word
-    if current:
-        lines.append(current)
-    return lines
+            if cur:
+                lines.append(cur)
+            cur = w
+    if cur:
+        lines.append(cur)
+    return lines or [text]
 
 
 def _add_branding(filepath: Path, headline: str):
     try:
-        from PIL import Image, ImageDraw, ImageFont
+        from PIL import Image, ImageDraw
         import re
 
         img = Image.open(filepath).convert("RGB")
-        w, h = img.size
+        W, H = img.size
 
-        # Find bold font
-        font_paths = [
-            "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-            "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
-            "/usr/share/fonts/truetype/ubuntu/Ubuntu-B.ttf",
-            "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
-        ]
-        font_path = None
-        for fp in font_paths:
-            if Path(fp).exists():
-                font_path = fp
-                break
+        hook_sz  = max(56, W // 15)
+        brand_sz = max(28, W // 34)
+        font_h = _get_font(hook_sz)
+        font_b = _get_font(brand_sz)
 
-        hook_size = max(54, w // 16)
-        brand_size = max(30, w // 30)
-        if font_path:
-            font_hook = ImageFont.truetype(font_path, hook_size)
-            font_brand = ImageFont.truetype(font_path, brand_size)
-        else:
-            font_hook = font_brand = ImageFont.load_default()
-
-        # Extract hook: first sentence, strip HTML, max 50 chars
+        # Extract hook: first sentence, strip HTML, max 52 chars
         clean = re.sub(r"<[^>]+>", "", headline).strip()
         first = re.split(r"[.!?\n]", clean)[0].strip()
-        hook = first[:50] + ("…" if len(first) > 50 else "")
+        hook  = first[:52] + ("…" if len(first) > 52 else "")
 
-        # Wrap hook text to fit 88% of width
-        dummy = ImageDraw.Draw(img)
-        lines = _wrap_text(dummy, hook, font_hook, w * 0.88)
+        # ── Bottom gradient (transparent → dark green) ─────────────────────
+        grad = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        gd   = ImageDraw.Draw(grad)
+        g0   = int(H * 0.38)
+        for y in range(g0, H):
+            a = int(235 * ((y - g0) / (H - g0)) ** 0.65)
+            gd.line([(0, y), (W, y)], fill=(5, 14, 9, a))
+        img = Image.alpha_composite(img.convert("RGBA"), grad).convert("RGB")
 
-        line_h = int(hook_size * 1.25)
-        block_h = len(lines) * line_h
-        pad = int(h * 0.03)
-
-        # Position: centered vertically in upper 55%
-        block_top = max(pad, int(h * 0.28) - block_h // 2)
-        block_bottom = block_top + block_h
-
-        # ── Step 1: dark semi-transparent box behind hook text ────────────────
-        box_img = img.convert("RGBA")
-        box_ov = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-        box_draw = ImageDraw.Draw(box_ov)
-        margin_x = int(w * 0.05)
-        box_draw.rectangle(
-            [(margin_x, block_top - pad), (w - margin_x, block_bottom + pad)],
-            fill=(0, 0, 0, 175),
-        )
-        img = Image.alpha_composite(box_img, box_ov).convert("RGB")
-
-        # ── Step 2: draw hook lines centered ─────────────────────────────────
         draw = ImageDraw.Draw(img)
+
+        # ── Wrap hook text ─────────────────────────────────────────────────
+        ml    = int(W * 0.06)           # left margin
+        max_w = int(W * 0.88)
+        lines = _wrap(draw, hook, font_h, max_w)
+
+        lh           = int(hook_sz * 1.22)
+        total_h      = len(lines) * lh
+        brand_y      = H - int(H * 0.07) - brand_sz
+        text_bottom  = brand_y - int(H * 0.045)
+        text_top     = text_bottom - total_h
+
+        # ── Draw each hook line (shadow + white) ───────────────────────────
         for i, line in enumerate(lines):
-            lw = _text_width(draw, line, font_hook)
-            x = (w - lw) / 2
-            y = block_top + i * line_h
-            # Shadow
-            draw.text((x + 2, y + 2), line, fill=(0, 0, 0, 160), font=font_hook)
-            # Text
-            draw.text((x, y), line, fill=(255, 255, 255), font=font_hook)
+            y = text_top + i * lh
+            draw.text((ml + 3, y + 3), line, fill=(0, 0, 0),       font=font_h)  # shadow
+            draw.text((ml,     y    ), line, fill=(255, 255, 255),  font=font_h)  # white
 
-        # ── Step 3: dark gradient at bottom for SEVEN-X ───────────────────────
-        bot_ov = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-        bot_draw = ImageDraw.Draw(bot_ov)
-        grad_start = int(h * 0.82)
-        for y in range(grad_start, h):
-            alpha = int(210 * (y - grad_start) / (h - grad_start))
-            bot_draw.line([(0, y), (w, y)], fill=(8, 20, 12, alpha))
-        img = Image.alpha_composite(img.convert("RGBA"), bot_ov).convert("RGB")
+        # ── Green accent line left of text ─────────────────────────────────
+        bar_x = ml - int(W * 0.022)
+        bar_w = max(5, int(W * 0.008))
+        draw.rectangle(
+            [(bar_x, text_top), (bar_x + bar_w, text_top + total_h)],
+            fill=(82, 183, 136),
+        )
 
-        # ── Step 4: SEVEN-X centered at bottom ───────────────────────────────
-        draw = ImageDraw.Draw(img)
-        bw = _text_width(draw, "SEVEN-X", font_brand)
-        draw.text(((w - bw) / 2, h - brand_size - int(h * 0.04)),
-                  "SEVEN-X", fill=(82, 183, 136), font=font_brand)
+        # ── SEVEN-X bottom left ────────────────────────────────────────────
+        draw.text((ml, brand_y), "SEVEN-X", fill=(82, 183, 136), font=font_b)
 
         img.save(filepath, "JPEG", quality=90)
     except Exception as e:
