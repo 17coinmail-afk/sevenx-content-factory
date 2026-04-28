@@ -76,13 +76,48 @@ SYSTEM_PROMPT = """\
 - Каждый вариант — уникальная структура и подача
 - Всегда заканчивай CTA с контактом Артёма"""
 
-IMAGE_PROMPT_BASE = (
-    "Professional business illustration for a Russian foreign trade payment company. "
-    "Deep forest green (#0f2018) background, gold and emerald accent colors. "
-    "Concepts: international money transfer, global trade routes, currency exchange. "
-    "Style: modern flat design with subtle geometric patterns, globe or world map elements, "
-    "currency symbols (¥ $ € ₽), clean corporate look. High quality. NO text or letters."
-)
+_IMAGE_STYLES = [
+    "cinematic photorealistic, dramatic lighting",
+    "sleek 3D render, dark studio background",
+    "professional digital art, vibrant colors",
+    "moody corporate photography style",
+    "modern minimalist illustration, bold shapes",
+]
+
+_TOPIC_VISUALS = {
+    "китай":    "Shanghai skyline, container ships, yuan coins, dragon motif",
+    "юань":     "Chinese yuan banknotes fanned out, gold bars, red and gold",
+    "дирхам":   "Dubai Burj Khalifa at night, UAE dirham gold coins, luxury",
+    "санкц":    "globe with glowing trade routes, barrier breaking, freedom path",
+    "ндс":      "money flowing back into hands, percentage symbol, tax refund",
+    "alipay":   "smartphone with QR code glow, digital payment beam, tech",
+    "wechat":   "mobile wallet, chat bubble with money, digital transfer",
+    "крипт":    "golden bitcoin, blockchain network nodes, crypto glow",
+    "валют":    "multiple currency banknotes fan, exchange rate display",
+    "вэд":      "cargo ship at sea, world map routes glowing, customs gate",
+    "выручк":   "money flowing into funnel, profit growth arrow, business win",
+    "агент":    "handshake over globe, contract document, trust symbol",
+    "платёж":   "lightning-fast wire transfer, globe with currency symbols",
+    "скорост":  "speedometer at max, rocket launch, fast delivery concept",
+}
+
+
+def _build_image_prompt(topic: str) -> str:
+    import random
+    style = random.choice(_IMAGE_STYLES)
+    topic_lower = topic.lower()
+    extra = ""
+    for key, visual in _TOPIC_VISUALS.items():
+        if key in topic_lower:
+            extra = f" Featured elements: {visual}."
+            break
+    return (
+        f"{style}. A powerful business image for a Russian foreign-trade payment company. "
+        f"Theme: '{topic}'.{extra} "
+        f"Color palette: deep forest green #0f2018, gold #c9a84c, emerald #52b788. "
+        f"International finance, global money transfers, premium corporate feel. "
+        f"NO text, NO letters, NO words anywhere in the image."
+    )
 
 DEFAULT_MODELS = {
     "https://api.groq.com/openai/v1": "llama-3.3-70b-versatile",
@@ -131,7 +166,7 @@ async def generate_text_variants(
 
 
 async def generate_image(topic: str, post_text: str, client: AsyncOpenAI) -> str:
-    prompt = f"{IMAGE_PROMPT_BASE} Topic context: '{topic}'."
+    prompt = _build_image_prompt(topic)
 
     response = await client.images.generate(
         model="dall-e-3",
@@ -226,76 +261,88 @@ def _add_branding(filepath: Path, headline: str):
         img = Image.open(filepath).convert("RGB")
         W, H = img.size
 
-        title_sz = max(72, W // 12)
-        sub_sz   = max(24, W // 38)
-        brand_sz = max(32, W // 28)
+        title_sz = max(52, W // 14)
+        sub_sz   = max(20, W // 44)
+        brand_sz = max(26, W // 34)
         font_t = _get_font(title_sz, bold=True)
         font_s = _get_font(sub_sz,   bold=False)
         font_b = _get_font(brand_sz, bold=True)
 
         is_tt = isinstance(font_t, ImageFont.FreeTypeFont)
-        logger.info(f"_add_branding: {W}x{H}, TrueType={is_tt}, font={font_t}")
+        logger.info(f"Branding start: {W}x{H} TrueType={is_tt} path={_BOLD_CANDIDATES[0]}")
 
         clean = re.sub(r"<[^>]+>", "", headline).strip()
         first = re.split(r"[.!?\n]", clean)[0].strip()
         title = first.upper()
 
-        # Dark gradient bottom 62%
-        grad = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-        gd   = ImageDraw.Draw(grad)
-        g0   = int(H * 0.38)
-        for y in range(g0, H):
-            t = (y - g0) / (H - g0)
-            a = int(230 * (t ** 0.45))
-            gd.line([(0, y), (W, y)], fill=(3, 10, 6, a))
-        img = Image.alpha_composite(img.convert("RGBA"), grad).convert("RGB")
-        draw = ImageDraw.Draw(img)
-
-        px    = int(W * 0.07)
+        px    = int(W * 0.06)   # left margin — all text starts here
         max_w = W - px * 2
 
-        # SEVEN-X bottom-left, emerald
-        brand_y = H - int(H * 0.055) - brand_sz
-        draw.text((px, brand_y), "SEVEN-X", fill=(82, 183, 136), font=font_b)
+        # Pre-wrap to know total text height
+        _tmp_draw = ImageDraw.Draw(img)
+        lines = _wrap(_tmp_draw, title, font_t, max_w)[:3]
+        lh      = int(title_sz * 1.22)
+        title_h = len(lines) * lh
+        sub_h   = sub_sz + int(H * 0.01)
+        brand_h = brand_sz
+        pad     = int(H * 0.03)
 
-        # Emerald rule above SEVEN-X
-        rule_y = brand_y - int(H * 0.02)
-        draw.rectangle(
-            [(px, rule_y), (W - px, rule_y + max(3, int(H * 0.003)))],
-            fill=(82, 183, 136),
-        )
+        # Total panel height: pad + title + gap + sub + gap + brand + pad
+        panel_h = pad + title_h + int(pad * 0.6) + sub_h + int(pad * 0.4) + brand_h + pad
+        panel_h = max(panel_h, int(H * 0.28))
+        panel_top = H - panel_h
 
-        # Contact — left, small, gray
-        sub_y = rule_y - int(H * 0.015) - sub_sz
-        draw.text((px, sub_y), "seven-x.ru  ·  Артём: +7 967 202-55-54",
-                  fill=(170, 170, 170), font=font_s)
+        # ── Soft fade above panel, then solid panel ────────────────────────
+        overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        od = ImageDraw.Draw(overlay)
+        fade_h = int(H * 0.10)
+        for i in range(fade_h):
+            a = int(160 * (i / fade_h))
+            od.line([(0, panel_top - fade_h + i), (W, panel_top - fade_h + i)],
+                    fill=(4, 12, 8, a))
+        od.rectangle([(0, panel_top), (W, H)], fill=(6, 16, 10, 242))  # near-solid
+        img = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
+        draw = ImageDraw.Draw(img)
 
-        # Headline — white ALL CAPS, left-aligned
-        lines   = _wrap(draw, title, font_t, max_w)[:3]
-        lh      = int(title_sz * 1.15)
-        total_h = len(lines) * lh
-        title_y = sub_y - int(H * 0.04) - total_h
+        # Emerald separator line at top of panel
+        sep = max(4, int(H * 0.004))
+        draw.rectangle([(0, panel_top), (W, panel_top + sep)], fill=(82, 183, 136))
 
-        for i, line in enumerate(lines):
-            y = title_y + i * lh
+        # ── Text layout — strictly left-aligned from px ───────────────────
+        y = panel_top + sep + pad
+
+        # Headline: white, ALL CAPS, large
+        for line in lines:
             if is_tt:
                 draw.text((px, y), line, fill=(255, 255, 255), font=font_t,
-                          stroke_width=max(3, title_sz // 20), stroke_fill=(0, 0, 0))
+                          stroke_width=max(2, title_sz // 24), stroke_fill=(0, 0, 0))
             else:
-                draw.text((px + 3, y + 3), line, fill=(0, 0, 0), font=font_t)
+                draw.text((px + 2, y + 2), line, fill=(0, 0, 0), font=font_t)
                 draw.text((px, y), line, fill=(255, 255, 255), font=font_t)
+            y += lh
+
+        y += int(pad * 0.5)
+
+        # Contact line: gray, small
+        draw.text((px, y), "seven-x.ru  ·  Артём: +7 967 202-55-54",
+                  fill=(160, 160, 160), font=font_s)
+        y += sub_h
+
+        # SEVEN-X: emerald, medium
+        draw.text((px, y), "SEVEN-X", fill=(82, 183, 136), font=font_b)
 
         img.save(filepath, "JPEG", quality=93)
-        logger.info(f"_add_branding OK: '{title[:35]}', lines={len(lines)}")
+        logger.info(f"Branding OK: '{title[:40]}' {len(lines)} lines, panel_h={panel_h}")
     except Exception as e:
-        logger.error(f"Branding overlay failed: {e}", exc_info=True)
+        logger.error(f"Branding failed: {e}", exc_info=True)
 
 
 async def generate_image_pollinations(topic: str, post_text: str) -> str:
     import random
-    prompt  = f"{IMAGE_PROMPT_BASE} Topic: {topic}."
+    prompt  = _build_image_prompt(topic)
     encoded = urllib.parse.quote(prompt)
     seed    = random.randint(1, 999_999)
+    logger.info(f"Image prompt (seed={seed}): {prompt[:120]}")
     url = (
         f"https://image.pollinations.ai/prompt/{encoded}"
         f"?width=1024&height=1024&nologo=true&model=flux&seed={seed}"
