@@ -89,6 +89,7 @@ def init_db():
         # Migrate: add columns that may be missing from old tables
         extra_cols = [
             ("topic", "TEXT"),
+            ("image_path", "TEXT"),
             ("style", "TEXT"),
             ("hashtags", "TEXT"),
             ("scheduled_at", "TEXT"),
