@@ -153,61 +153,114 @@ async def generate_image(topic: str, post_text: str, client: AsyncOpenAI) -> str
     return f"/images/{filename}"
 
 
+def _text_width(draw, text, font):
+    try:
+        return draw.textlength(text, font=font)
+    except AttributeError:
+        return draw.textsize(text, font=font)[0]
+
+
+def _wrap_text(draw, text, font, max_width):
+    words = text.split()
+    lines, current = [], ""
+    for word in words:
+        candidate = f"{current} {word}".strip()
+        if _text_width(draw, candidate, font) <= max_width:
+            current = candidate
+        else:
+            if current:
+                lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
+    return lines
+
+
 def _add_branding(filepath: Path, headline: str):
     try:
         from PIL import Image, ImageDraw, ImageFont
         import re
 
-        img = Image.open(filepath).convert("RGBA")
+        img = Image.open(filepath).convert("RGB")
         w, h = img.size
 
-        # Dark gradient overlay at bottom 38%
-        overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-        draw_ov = ImageDraw.Draw(overlay)
-        band_start = int(h * 0.62)
-        for y in range(band_start, h):
-            alpha = int(200 * (y - band_start) / (h - band_start))
-            draw_ov.line([(0, y), (w, y)], fill=(8, 20, 12, alpha))
-
-        result = Image.alpha_composite(img, overlay).convert("RGB")
-        draw = ImageDraw.Draw(result)
-
-        # Try to find a bold font
+        # Find bold font
         font_paths = [
             "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
             "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
             "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
             "/usr/share/fonts/truetype/ubuntu/Ubuntu-B.ttf",
+            "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
         ]
-        font_large = font_small = None
+        font_path = None
         for fp in font_paths:
             if Path(fp).exists():
-                try:
-                    font_large = ImageFont.truetype(fp, size=max(36, w // 22))
-                    font_small = ImageFont.truetype(fp, size=max(26, w // 30))
-                    break
-                except Exception:
-                    pass
-        if font_large is None:
-            font_large = font_small = ImageFont.load_default()
+                font_path = fp
+                break
 
-        # Strip HTML tags for display
+        hook_size = max(54, w // 16)
+        brand_size = max(30, w // 30)
+        if font_path:
+            font_hook = ImageFont.truetype(font_path, hook_size)
+            font_brand = ImageFont.truetype(font_path, brand_size)
+        else:
+            font_hook = font_brand = ImageFont.load_default()
+
+        # Extract hook: first sentence, strip HTML, max 50 chars
         clean = re.sub(r"<[^>]+>", "", headline).strip()
-        # Take first line up to 55 chars
-        first_line = clean.split("\n")[0][:55]
-        if len(clean.split("\n")[0]) > 55:
-            first_line += "…"
+        first = re.split(r"[.!?\n]", clean)[0].strip()
+        hook = first[:50] + ("…" if len(first) > 50 else "")
 
-        # Bottom branding bar
-        margin = int(w * 0.05)
-        brand_y = h - int(h * 0.09)
-        draw.text((margin, brand_y), "SEVEN-X", fill=(82, 183, 136), font=font_small)
+        # Wrap hook text to fit 88% of width
+        dummy = ImageDraw.Draw(img)
+        lines = _wrap_text(dummy, hook, font_hook, w * 0.88)
 
-        # Headline above branding
-        headline_y = brand_y - int(h * 0.11)
-        draw.text((margin, headline_y), first_line, fill=(255, 255, 255), font=font_large)
+        line_h = int(hook_size * 1.25)
+        block_h = len(lines) * line_h
+        pad = int(h * 0.03)
 
-        result.save(filepath, "JPEG", quality=88)
+        # Position: centered vertically in upper 55%
+        block_top = max(pad, int(h * 0.28) - block_h // 2)
+        block_bottom = block_top + block_h
+
+        # ── Step 1: dark semi-transparent box behind hook text ────────────────
+        box_img = img.convert("RGBA")
+        box_ov = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        box_draw = ImageDraw.Draw(box_ov)
+        margin_x = int(w * 0.05)
+        box_draw.rectangle(
+            [(margin_x, block_top - pad), (w - margin_x, block_bottom + pad)],
+            fill=(0, 0, 0, 175),
+        )
+        img = Image.alpha_composite(box_img, box_ov).convert("RGB")
+
+        # ── Step 2: draw hook lines centered ─────────────────────────────────
+        draw = ImageDraw.Draw(img)
+        for i, line in enumerate(lines):
+            lw = _text_width(draw, line, font_hook)
+            x = (w - lw) / 2
+            y = block_top + i * line_h
+            # Shadow
+            draw.text((x + 2, y + 2), line, fill=(0, 0, 0, 160), font=font_hook)
+            # Text
+            draw.text((x, y), line, fill=(255, 255, 255), font=font_hook)
+
+        # ── Step 3: dark gradient at bottom for SEVEN-X ───────────────────────
+        bot_ov = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        bot_draw = ImageDraw.Draw(bot_ov)
+        grad_start = int(h * 0.82)
+        for y in range(grad_start, h):
+            alpha = int(210 * (y - grad_start) / (h - grad_start))
+            bot_draw.line([(0, y), (w, y)], fill=(8, 20, 12, alpha))
+        img = Image.alpha_composite(img.convert("RGBA"), bot_ov).convert("RGB")
+
+        # ── Step 4: SEVEN-X centered at bottom ───────────────────────────────
+        draw = ImageDraw.Draw(img)
+        bw = _text_width(draw, "SEVEN-X", font_brand)
+        draw.text(((w - bw) / 2, h - brand_size - int(h * 0.04)),
+                  "SEVEN-X", fill=(82, 183, 136), font=font_brand)
+
+        img.save(filepath, "JPEG", quality=90)
     except Exception as e:
         logger.warning(f"Branding overlay failed: {e}")
 
