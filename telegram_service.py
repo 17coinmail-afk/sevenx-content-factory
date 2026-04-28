@@ -21,7 +21,7 @@ async def send_post(
             if not channel_id:
                 continue
             try:
-                local_path = image_path.lstrip("/") if image_path else None
+                local_path = image_path if image_path else None
 
                 if local_path and Path(local_path).exists():
                     with open(local_path, "rb") as photo:
