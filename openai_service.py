@@ -155,47 +155,50 @@ async def generate_image(topic: str, post_text: str, client: AsyncOpenAI) -> str
 
 _font_cache: dict = {}
 
+# Font search order: app-bundled → downloaded → system → PIL default
+_FONT_SEARCH = [
+    Path(__file__).parent / "fonts" / "Bold.ttf",           # committed to repo
+    Path("/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"),
+    Path("/usr/share/fonts/opentype/open-sans/OpenSans-Bold.ttf"),
+    Path("/usr/share/fonts/truetype/open-sans/OpenSans-Bold.ttf"),
+    Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
+    Path("/usr/share/fonts/truetype/freefont/FreeSansBold.ttf"),
+]
+_FONT_REGULAR_SEARCH = [
+    Path(__file__).parent / "fonts" / "Regular.ttf",
+    Path("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"),
+    Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
+]
 
-def _get_font(size: int):
+
+def _find_font_file(paths: list) -> Path | None:
+    for p in paths:
+        if p.exists():
+            return p
+    return None
+
+
+def _get_font(size: int, bold: bool = True):
+    key = (size, bold)
+    if key in _font_cache:
+        return _font_cache[key]
+
     from PIL import ImageFont
 
-    if size in _font_cache:
-        return _font_cache[size]
-
-    font_file = IMAGES_DIR / "MontserratBold.ttf"
-    if not font_file.exists():
-        try:
-            import urllib.request
-            urllib.request.urlretrieve(
-                "https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/montserrat/static/Montserrat-Bold.ttf",
-                str(font_file),
-            )
-        except Exception:
-            pass
+    paths = _FONT_SEARCH if bold else _FONT_REGULAR_SEARCH
+    font_file = _find_font_file(paths)
 
     font = None
-    if font_file.exists():
+    if font_file:
         try:
             font = ImageFont.truetype(str(font_file), size)
         except Exception:
             pass
 
     if font is None:
-        for fp in [
-            "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-        ]:
-            if Path(fp).exists():
-                try:
-                    font = ImageFont.truetype(fp, size)
-                    break
-                except Exception:
-                    pass
-
-    if font is None:
         font = ImageFont.load_default()
 
-    _font_cache[size] = font
+    _font_cache[key] = font
     return font
 
 
@@ -224,71 +227,94 @@ def _wrap(draw, text, font, max_w):
 
 def _add_branding(filepath: Path, headline: str):
     try:
-        from PIL import Image, ImageDraw
+        from PIL import Image, ImageDraw, ImageFilter
         import re
 
         img = Image.open(filepath).convert("RGB")
         W, H = img.size
 
-        title_sz = max(58, W // 14)   # large caps headline
-        sub_sz   = max(22, W // 40)   # contact subline
-        brand_sz = max(30, W // 30)   # SEVEN-X
-        font_t = _get_font(title_sz)
-        font_s = _get_font(sub_sz)
-        font_b = _get_font(brand_sz)
+        # ── Sizes ─────────────────────────────────────────────────────────
+        title_sz = max(66, W // 13)       # dominant headline
+        sub_sz   = max(22, W // 42)       # small contact line
+        brand_sz = max(28, W // 32)       # SEVEN-X wordmark
+        font_t = _get_font(title_sz, bold=True)
+        font_s = _get_font(sub_sz,   bold=False)
+        font_b = _get_font(brand_sz, bold=True)
 
-        # First sentence → ALL CAPS headline
+        # ── Text content ──────────────────────────────────────────────────
         clean = re.sub(r"<[^>]+>", "", headline).strip()
-        title = re.split(r"[.!?\n]", clean)[0].strip().upper()
+        first = re.split(r"[.!?\n]", clean)[0].strip()
+        title = first.upper()             # ALL CAPS like the reference
 
-        # ── Two-layer dark overlay (like reference) ─────────────────────────
-        # Layer 1: mild full-image darkening
-        dim = Image.new("RGBA", (W, H), (0, 0, 0, 100))
-        img = Image.alpha_composite(img.convert("RGBA"), dim)
+        # ── Layer 1: full-image subtle dark veil ──────────────────────────
+        veil = Image.new("RGBA", (W, H), (0, 0, 0, 90))
+        img  = Image.alpha_composite(img.convert("RGBA"), veil)
 
-        # Layer 2: stronger gradient bottom 65%
+        # ── Layer 2: heavy gradient bottom 55% → near-black ──────────────
         grad = Image.new("RGBA", (W, H), (0, 0, 0, 0))
         gd   = ImageDraw.Draw(grad)
-        g0   = int(H * 0.35)
+        g0   = int(H * 0.30)
         for y in range(g0, H):
             t = (y - g0) / (H - g0)
-            a = int(185 * (t ** 0.6))
-            gd.line([(0, y), (W, y)], fill=(4, 10, 7, a))
-        img = Image.alpha_composite(img, grad).convert("RGB")
+            a = int(215 * (t ** 0.55))
+            gd.line([(0, y), (W, y)], fill=(4, 12, 8, a))
+        img  = Image.alpha_composite(img, grad).convert("RGB")
         draw = ImageDraw.Draw(img)
 
-        pad_x = int(W * 0.07)
+        pad_x  = int(W * 0.07)
+        pad_b  = int(H * 0.06)           # bottom padding
+        max_tw = W - pad_x * 2
 
-        # ── SEVEN-X — centered at very bottom ─────────────────────────────
-        brand_text = "SEVEN-X"
-        bw = _tw(draw, brand_text, font_b)
-        brand_y = H - int(H * 0.07)
-        draw.text(((W - bw) // 2, brand_y), brand_text, fill=(255, 255, 255), font=font_b)
+        # ── Bottom anchor: SEVEN-X centered ──────────────────────────────
+        bw      = _tw(draw, "SEVEN-X", font_b)
+        brand_y = H - pad_b - brand_sz
+        draw.text(((W - bw) // 2, brand_y), "SEVEN-X",
+                  fill=(255, 255, 255), font=font_b)
 
-        # ── Contact subline ────────────────────────────────────────────────
-        sub_text = "seven-x.ru  •  Артём: +7 967 202-55-54"
-        sub_y = brand_y - sub_sz - int(H * 0.025)
-        draw.text((pad_x, sub_y), sub_text, fill=(180, 180, 180), font=font_s)
+        # ── Thin emerald rule above brand ─────────────────────────────────
+        rule_y = brand_y - int(H * 0.022)
+        draw.rectangle([(pad_x, rule_y), (W - pad_x, rule_y + max(2, int(H*0.003)))],
+                       fill=(82, 183, 136))
 
-        # ── Title: emerald, ALL CAPS, large, left-aligned ─────────────────
-        max_w  = int(W * 0.86)
-        lines  = _wrap(draw, title, font_t, max_w)[:3]
-        lh     = int(title_sz * 1.15)
-        total  = len(lines) * lh
-        title_y = sub_y - int(H * 0.03) - total
+        # ── Contact line above rule ───────────────────────────────────────
+        sub_text = "seven-x.ru  ·  Артём +7 967 202-55-54"
+        sub_y    = rule_y - int(H * 0.016) - sub_sz
+        draw.text((pad_x, sub_y), sub_text, fill=(160, 160, 160), font=font_s)
+
+        # ── Headline: ALL CAPS, white, large, left — the hero element ─────
+        lines   = _wrap(draw, title, font_t, max_tw)[:3]
+        lh      = int(title_sz * 1.18)
+        total_h = len(lines) * lh
+        title_y = sub_y - int(H * 0.038) - total_h
 
         for i, line in enumerate(lines):
-            draw.text((pad_x, title_y + i * lh), line, fill=(82, 183, 136), font=font_t)
+            y = title_y + i * lh
+            # Tight shadow for depth (1 px offset, semi-transparent)
+            draw.text((pad_x + 2, y + 2), line, fill=(0, 0, 0, 160), font=font_t)
+            draw.text((pad_x, y),         line, fill=(255, 255, 255), font=font_t)
 
-        img.save(filepath, "JPEG", quality=92)
+        # ── Emerald left accent bar alongside headline ─────────────────────
+        bar_x = pad_x - int(W * 0.025)
+        bar_w = max(6, int(W * 0.009))
+        draw.rectangle(
+            [(bar_x, title_y - 4), (bar_x + bar_w, title_y + total_h + 4)],
+            fill=(82, 183, 136),
+        )
+
+        img.save(filepath, "JPEG", quality=93)
     except Exception as e:
         logger.warning(f"Branding overlay failed: {e}")
 
 
 async def generate_image_pollinations(topic: str, post_text: str) -> str:
-    prompt = f"{IMAGE_PROMPT_BASE} Topic: {topic}."
+    import random
+    prompt  = f"{IMAGE_PROMPT_BASE} Topic: {topic}."
     encoded = urllib.parse.quote(prompt)
-    url = f"https://image.pollinations.ai/prompt/{encoded}?width=1024&height=1024&nologo=true&model=flux"
+    seed    = random.randint(1, 999_999)
+    url = (
+        f"https://image.pollinations.ai/prompt/{encoded}"
+        f"?width=1024&height=1024&nologo=true&model=flux&seed={seed}"
+    )
 
     filename = f"{uuid.uuid4()}.jpg"
     filepath = IMAGES_DIR / filename

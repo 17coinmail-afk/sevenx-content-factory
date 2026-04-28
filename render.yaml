@@ -3,7 +3,7 @@ services:
     name: sevenx-content-factory
     env: python
     plan: free
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install -r requirements.txt && (apt-get install -y fonts-liberation fonts-open-sans 2>/dev/null || true)
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: OPENAI_API_KEY
