@@ -1,3 +1,4 @@
+import os
 import logging
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -7,6 +8,19 @@ logger = logging.getLogger(__name__)
 scheduler = AsyncIOScheduler()
 _publish_callback = None
 _auto_post_callback = None
+
+
+async def _keep_alive():
+    url = os.getenv("RENDER_EXTERNAL_URL", "")
+    if not url:
+        return
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=10) as client:
+            await client.get(f"{url}/health")
+        logger.debug("Keep-alive ping sent")
+    except Exception:
+        pass
 
 
 async def _check_scheduled():
@@ -30,6 +44,13 @@ def start(publish_callback):
         "interval",
         minutes=1,
         id="check_scheduled",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        _keep_alive,
+        "interval",
+        minutes=10,
+        id="keep_alive",
         replace_existing=True,
     )
 
