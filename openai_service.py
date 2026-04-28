@@ -3,6 +3,7 @@ import uuid
 import json
 import httpx
 import logging
+import urllib.parse
 from pathlib import Path
 from openai import AsyncOpenAI
 
@@ -25,6 +26,11 @@ IMAGE_PROMPT_BASE = (
     "world map elements, clean minimal design. High quality render. Absolutely NO text or letters in the image."
 )
 
+DEFAULT_MODELS = {
+    "https://api.groq.com/openai/v1": "llama-3.3-70b-versatile",
+    "https://api.deepseek.com": "deepseek-chat",
+}
+
 
 async def generate_text_variants(
     topic: str,
@@ -32,6 +38,7 @@ async def generate_text_variants(
     brand_voice: str,
     currency_text: str,
     client: AsyncOpenAI,
+    model: str = "gpt-4o",
 ) -> list[dict]:
     style_prompt = STYLE_PROMPTS.get(style, STYLE_PROMPTS["expert"])
     currency_block = f"\n\nВключи в пост актуальные курсы валют:\n{currency_text}" if currency_text else ""
@@ -56,7 +63,7 @@ async def generate_text_variants(
 }}"""
 
     response = await client.chat.completions.create(
-        model="gpt-4o",
+        model=model,
         messages=[
             {"role": "system", "content": brand_voice},
             {"role": "user", "content": user_prompt},
@@ -88,5 +95,21 @@ async def generate_image(topic: str, post_text: str, client: AsyncOpenAI) -> str
         img_resp = await http.get(image_url)
         img_resp.raise_for_status()
         filepath.write_bytes(img_resp.content)
+
+    return f"/images/{filename}"
+
+
+async def generate_image_pollinations(topic: str, post_text: str) -> str:
+    prompt = f"{IMAGE_PROMPT_BASE} Topic: {topic}."
+    encoded = urllib.parse.quote(prompt)
+    url = f"https://image.pollinations.ai/prompt/{encoded}?width=1024&height=1024&nologo=true&enhance=true&model=flux"
+
+    filename = f"{uuid.uuid4()}.jpg"
+    filepath = IMAGES_DIR / filename
+
+    async with httpx.AsyncClient(timeout=120, follow_redirects=True) as http:
+        resp = await http.get(url)
+        resp.raise_for_status()
+        filepath.write_bytes(resp.content)
 
     return f"/images/{filename}"

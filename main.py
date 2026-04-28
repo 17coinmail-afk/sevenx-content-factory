@@ -126,6 +126,9 @@ async def get_settings():
 
 class SettingsIn(BaseModel):
     openai_api_key: Optional[str] = None
+    ai_base_url: Optional[str] = None
+    ai_model: Optional[str] = None
+    image_provider: Optional[str] = None
     telegram_bot_token: Optional[str] = None
     channel_1_id: Optional[str] = None
     channel_2_id: Optional[str] = None
@@ -174,15 +177,34 @@ class GenerateIn(BaseModel):
     brand_voice: Optional[str] = None
 
 
+def _make_ai_client(s: dict):
+    from openai import AsyncOpenAI
+    from openai_service import DEFAULT_MODELS
+    api_key = os.getenv("OPENAI_API_KEY") or s.get("openai_api_key", "")
+    base_url = s.get("ai_base_url", "").strip() or None
+    if not api_key:
+        raise HTTPException(400, "API key not configured")
+    kwargs = {"api_key": api_key}
+    if base_url:
+        kwargs["base_url"] = base_url
+    return AsyncOpenAI(**kwargs), base_url
+
+
+def _resolve_model(s: dict, base_url: Optional[str]) -> str:
+    from openai_service import DEFAULT_MODELS
+    model = s.get("ai_model", "").strip()
+    if model:
+        return model
+    return DEFAULT_MODELS.get(base_url or "", "gpt-4o")
+
+
 @app.post("/api/generate")
 async def generate(req: GenerateIn):
-    from openai import AsyncOpenAI
     from openai_service import generate_text_variants
 
     s = db.get_settings()
-    api_key = os.getenv("OPENAI_API_KEY") or s.get("openai_api_key", "")
-    if not api_key:
-        raise HTTPException(400, "OpenAI API key not configured")
+    client, base_url = _make_ai_client(s)
+    model = _resolve_model(s, base_url)
 
     currency_text = ""
     if req.include_rates:
@@ -190,7 +212,6 @@ async def generate(req: GenerateIn):
         currency_text = format_rates_for_post(rates)
 
     brand_voice = req.brand_voice or s.get("brand_voice", "")
-    client = AsyncOpenAI(api_key=api_key)
 
     try:
         variants = await generate_text_variants(
@@ -199,6 +220,7 @@ async def generate(req: GenerateIn):
             brand_voice=brand_voice,
             currency_text=currency_text,
             client=client,
+            model=model,
         )
         return {"variants": variants}
     except Exception as e:
@@ -213,17 +235,17 @@ class GenerateImageIn(BaseModel):
 
 @app.post("/api/generate/image")
 async def generate_image(req: GenerateImageIn):
-    from openai import AsyncOpenAI
-    from openai_service import generate_image as gen_img
+    from openai_service import generate_image as gen_img, generate_image_pollinations
 
     s = db.get_settings()
-    api_key = os.getenv("OPENAI_API_KEY") or s.get("openai_api_key", "")
-    if not api_key:
-        raise HTTPException(400, "OpenAI API key not configured")
+    image_provider = s.get("image_provider", "pollinations")
 
-    client = AsyncOpenAI(api_key=api_key)
     try:
-        url = await gen_img(req.topic, req.post_text, client)
+        if image_provider == "pollinations":
+            url = await generate_image_pollinations(req.topic, req.post_text)
+        else:
+            client, _ = _make_ai_client(s)
+            url = await gen_img(req.topic, req.post_text, client)
         return {"image_url": url}
     except Exception as e:
         logger.error(f"Image error: {e}")

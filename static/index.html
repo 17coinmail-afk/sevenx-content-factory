@@ -413,25 +413,70 @@
         <p class="text-[#5a8a6a] text-sm mt-0.5">Конфигурация системы</p>
       </div>
 
-      <!-- API Keys -->
+      <!-- AI Provider -->
       <div class="bg-[#0f2018] border border-[#1a3328] rounded-2xl p-5 mb-4">
-        <h2 class="text-sm font-semibold mb-4">🔑 API ключи</h2>
+        <h2 class="text-sm font-semibold mb-3">🤖 AI Провайдер</h2>
+        <div class="flex gap-2 mb-4">
+          <button @click="setProvider('openai')"
+                  :class="sf.ai_base_url===''?'bg-[#2d6a4f] text-white border-[#2d6a4f]':'bg-[#071410] text-[#5a8a6a] border-[#1a3328] hover:border-[#2d6a4f]'"
+                  class="flex-1 border text-xs py-2.5 rounded-xl transition-all">OpenAI</button>
+          <button @click="setProvider('groq')"
+                  :class="sf.ai_base_url==='https://api.groq.com/openai/v1'?'bg-[#2d6a4f] text-white border-[#2d6a4f]':'bg-[#071410] text-[#5a8a6a] border-[#1a3328] hover:border-[#2d6a4f]'"
+                  class="flex-1 border text-xs py-2.5 rounded-xl transition-all">Groq <span class="text-green-400">FREE</span></button>
+          <button @click="setProvider('deepseek')"
+                  :class="sf.ai_base_url==='https://api.deepseek.com'?'bg-[#2d6a4f] text-white border-[#2d6a4f]':'bg-[#071410] text-[#5a8a6a] border-[#1a3328] hover:border-[#2d6a4f]'"
+                  class="flex-1 border text-xs py-2.5 rounded-xl transition-all">DeepSeek</button>
+        </div>
         <div class="space-y-3">
           <div>
-            <label class="block text-xs text-[#5a8a6a] mb-1">OpenAI API Key</label>
+            <label class="block text-xs text-[#5a8a6a] mb-1">API Key</label>
             <input x-model="sf.openai_api_key" type="password"
-                   :placeholder="settings.openai_api_key_masked||'sk-...'"
+                   :placeholder="settings.openai_api_key_masked||'ключ от провайдера'"
                    class="w-full bg-[#071410] border border-[#1a3328] text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-[#52b788] transition-colors placeholder-[#2d5040]">
           </div>
           <div>
-            <label class="block text-xs text-[#5a8a6a] mb-1">Telegram Bot Token</label>
-            <div class="flex gap-2">
-              <input x-model="sf.telegram_bot_token" type="password"
-                     :placeholder="settings.telegram_bot_token_masked||'123456:ABC...'"
-                     class="flex-1 bg-[#071410] border border-[#1a3328] text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-[#52b788] transition-colors placeholder-[#2d5040]">
-              <button @click="testTg()"
-                      class="bg-[#071410] border border-[#1a3328] hover:border-[#2d6a4f] text-[#5a8a6a] text-sm px-4 py-2.5 rounded-xl transition-all flex-shrink-0">Тест</button>
-            </div>
+            <label class="block text-xs text-[#5a8a6a] mb-1">Base URL <span class="text-[#3d6b52] font-normal">(пусто = OpenAI)</span></label>
+            <input x-model="sf.ai_base_url" placeholder="https://api.groq.com/openai/v1"
+                   class="w-full bg-[#071410] border border-[#1a3328] text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-[#52b788] transition-colors placeholder-[#2d5040]">
+          </div>
+          <div>
+            <label class="block text-xs text-[#5a8a6a] mb-1">Модель <span class="text-[#3d6b52] font-normal">(пусто = авто)</span></label>
+            <input x-model="sf.ai_model" placeholder="llama-3.3-70b-versatile"
+                   class="w-full bg-[#071410] border border-[#1a3328] text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-[#52b788] transition-colors placeholder-[#2d5040]">
+          </div>
+        </div>
+      </div>
+
+      <!-- Image Provider -->
+      <div class="bg-[#0f2018] border border-[#1a3328] rounded-2xl p-5 mb-4">
+        <h2 class="text-sm font-semibold mb-3">🖼 Генерация картинок</h2>
+        <div class="flex gap-2">
+          <button @click="sf.image_provider='pollinations'"
+                  :class="sf.image_provider!=='openai'?'bg-[#2d6a4f] text-white border-[#2d6a4f]':'bg-[#071410] text-[#5a8a6a] border-[#1a3328] hover:border-[#2d6a4f]'"
+                  class="flex-1 border text-xs py-3 rounded-xl transition-all text-center">
+            <div>🆓 Pollinations.ai</div>
+            <div class="text-green-400 text-[10px] mt-0.5">бесплатно, без ключа</div>
+          </button>
+          <button @click="sf.image_provider='openai'"
+                  :class="sf.image_provider==='openai'?'bg-[#2d6a4f] text-white border-[#2d6a4f]':'bg-[#071410] text-[#5a8a6a] border-[#1a3328] hover:border-[#2d6a4f]'"
+                  class="flex-1 border text-xs py-3 rounded-xl transition-all text-center">
+            <div>DALL-E 3</div>
+            <div class="text-[#5a8a6a] text-[10px] mt-0.5">требует OpenAI ключ</div>
+          </button>
+        </div>
+      </div>
+
+      <!-- Telegram -->
+      <div class="bg-[#0f2018] border border-[#1a3328] rounded-2xl p-5 mb-4">
+        <h2 class="text-sm font-semibold mb-4">🔑 Telegram</h2>
+        <div>
+          <label class="block text-xs text-[#5a8a6a] mb-1">Bot Token</label>
+          <div class="flex gap-2">
+            <input x-model="sf.telegram_bot_token" type="password"
+                   :placeholder="settings.telegram_bot_token_masked||'123456:ABC...'"
+                   class="flex-1 bg-[#071410] border border-[#1a3328] text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-[#52b788] transition-colors placeholder-[#2d5040]">
+            <button @click="testTg()"
+                    class="bg-[#071410] border border-[#1a3328] hover:border-[#2d6a4f] text-[#5a8a6a] text-sm px-4 py-2.5 rounded-xl transition-all flex-shrink-0">Тест</button>
           </div>
         </div>
       </div>
@@ -561,6 +606,7 @@ function app() {
     sf: {
       openai_api_key: '', telegram_bot_token: '',
       channel_1_id: '', channel_2_id: '',
+      ai_base_url: '', ai_model: '', image_provider: 'pollinations',
       auto_post_enabled: 'false', brand_voice: '',
       saving: false,
     },
@@ -606,10 +652,24 @@ function app() {
         this.settings = await r.json();
         this.sf.channel_1_id = this.settings.channel_1_id || '';
         this.sf.channel_2_id = this.settings.channel_2_id || '';
+        this.sf.ai_base_url = this.settings.ai_base_url || '';
+        this.sf.ai_model = this.settings.ai_model || '';
+        this.sf.image_provider = this.settings.image_provider || 'pollinations';
         this.sf.auto_post_enabled = this.settings.auto_post_enabled || 'false';
         this.sf.brand_voice = this.settings.brand_voice || '';
         try { this.autoTimes = JSON.parse(this.settings.auto_post_times || '["10:00","19:00"]'); } catch(e) {}
       } catch(e) {}
+    },
+
+    setProvider(name) {
+      const presets = {
+        openai: { url: '', model: '' },
+        groq: { url: 'https://api.groq.com/openai/v1', model: 'llama-3.3-70b-versatile' },
+        deepseek: { url: 'https://api.deepseek.com', model: 'deepseek-chat' },
+      };
+      const p = presets[name] || presets.openai;
+      this.sf.ai_base_url = p.url;
+      this.sf.ai_model = p.model;
     },
 
     async saveSettings() {
@@ -618,6 +678,9 @@ function app() {
         const body = {
           channel_1_id: this.sf.channel_1_id,
           channel_2_id: this.sf.channel_2_id,
+          ai_base_url: this.sf.ai_base_url,
+          ai_model: this.sf.ai_model,
+          image_provider: this.sf.image_provider,
           auto_post_enabled: this.sf.auto_post_enabled,
           auto_post_times: JSON.stringify(this.autoTimes),
           brand_voice: this.sf.brand_voice,
