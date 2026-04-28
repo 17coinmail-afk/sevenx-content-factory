@@ -38,7 +38,7 @@ async def publish_post(post_id: int):
     bot_token = os.getenv("TELEGRAM_BOT_TOKEN") or settings.get("telegram_bot_token", "")
     ch1 = os.getenv("CHANNEL_1_ID") or settings.get("channel_1_id", "")
     ch2 = os.getenv("CHANNEL_2_ID") or settings.get("channel_2_id", "")
-    channels = [c for c in [ch1, ch2] if c]
+    channels = list(dict.fromkeys(c for c in [ch1, ch2] if c))
 
     if not bot_token or not channels:
         logger.error("Telegram not configured")
@@ -98,6 +98,11 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Seven-X Content Factory", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 app.mount("/images", StaticFiles(directory=str(IMAGES_DIR)), name="images")
+
+
+@app.get("/health")
+async def health():
+    return {"ok": True}
 
 
 @app.get("/")
