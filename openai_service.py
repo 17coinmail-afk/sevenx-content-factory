@@ -153,10 +153,69 @@ async def generate_image(topic: str, post_text: str, client: AsyncOpenAI) -> str
     return f"/images/{filename}"
 
 
+def _add_branding(filepath: Path, headline: str):
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+        import re
+
+        img = Image.open(filepath).convert("RGBA")
+        w, h = img.size
+
+        # Dark gradient overlay at bottom 38%
+        overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        draw_ov = ImageDraw.Draw(overlay)
+        band_start = int(h * 0.62)
+        for y in range(band_start, h):
+            alpha = int(200 * (y - band_start) / (h - band_start))
+            draw_ov.line([(0, y), (w, y)], fill=(8, 20, 12, alpha))
+
+        result = Image.alpha_composite(img, overlay).convert("RGB")
+        draw = ImageDraw.Draw(result)
+
+        # Try to find a bold font
+        font_paths = [
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+            "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
+            "/usr/share/fonts/truetype/ubuntu/Ubuntu-B.ttf",
+        ]
+        font_large = font_small = None
+        for fp in font_paths:
+            if Path(fp).exists():
+                try:
+                    font_large = ImageFont.truetype(fp, size=max(36, w // 22))
+                    font_small = ImageFont.truetype(fp, size=max(26, w // 30))
+                    break
+                except Exception:
+                    pass
+        if font_large is None:
+            font_large = font_small = ImageFont.load_default()
+
+        # Strip HTML tags for display
+        clean = re.sub(r"<[^>]+>", "", headline).strip()
+        # Take first line up to 55 chars
+        first_line = clean.split("\n")[0][:55]
+        if len(clean.split("\n")[0]) > 55:
+            first_line += "…"
+
+        # Bottom branding bar
+        margin = int(w * 0.05)
+        brand_y = h - int(h * 0.09)
+        draw.text((margin, brand_y), "SEVEN-X", fill=(82, 183, 136), font=font_small)
+
+        # Headline above branding
+        headline_y = brand_y - int(h * 0.11)
+        draw.text((margin, headline_y), first_line, fill=(255, 255, 255), font=font_large)
+
+        result.save(filepath, "JPEG", quality=88)
+    except Exception as e:
+        logger.warning(f"Branding overlay failed: {e}")
+
+
 async def generate_image_pollinations(topic: str, post_text: str) -> str:
     prompt = f"{IMAGE_PROMPT_BASE} Topic: {topic}."
     encoded = urllib.parse.quote(prompt)
-    url = f"https://image.pollinations.ai/prompt/{encoded}?width=1024&height=1024&nologo=true&model=flux-schnell"
+    url = f"https://image.pollinations.ai/prompt/{encoded}?width=1024&height=1024&nologo=true&model=flux"
 
     filename = f"{uuid.uuid4()}.jpg"
     filepath = IMAGES_DIR / filename
@@ -164,6 +223,9 @@ async def generate_image_pollinations(topic: str, post_text: str) -> str:
     async with httpx.AsyncClient(timeout=120, follow_redirects=True) as http:
         resp = await http.get(url)
         resp.raise_for_status()
+        if len(resp.content) < 5000:
+            raise ValueError(f"Pollinations returned too-small response ({len(resp.content)} bytes)")
         filepath.write_bytes(resp.content)
 
+    _add_branding(filepath, post_text or topic)
     return f"/images/{filename}"

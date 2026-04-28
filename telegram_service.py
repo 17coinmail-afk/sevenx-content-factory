@@ -4,6 +4,8 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+CAPTION_LIMIT = 1024
+
 
 async def send_post(
     bot_token: str,
@@ -13,6 +15,7 @@ async def send_post(
     hashtags: str = "",
 ) -> dict:
     full_text = f"{text}\n\n{hashtags}" if hashtags else text
+    caption = full_text[:CAPTION_LIMIT] if len(full_text) > CAPTION_LIMIT else full_text
     results = {}
     base = f"https://api.telegram.org/bot{bot_token}"
 
@@ -22,30 +25,42 @@ async def send_post(
                 continue
             try:
                 local_path = image_path if image_path else None
+                sent_photo = False
 
                 if local_path and Path(local_path).exists():
+                    logger.info(f"Sending photo {local_path} to {channel_id}")
                     with open(local_path, "rb") as photo:
                         resp = await client.post(
                             f"{base}/sendPhoto",
-                            data={"chat_id": channel_id, "caption": full_text, "parse_mode": "HTML"},
+                            data={"chat_id": channel_id, "caption": caption, "parse_mode": "HTML"},
                             files={"photo": ("image.jpg", photo, "image/jpeg")},
                         )
+                    data = resp.json()
+                    if data.get("ok"):
+                        results[channel_id] = {
+                            "success": True,
+                            "message_id": data["result"]["message_id"],
+                        }
+                        sent_photo = True
+                    else:
+                        logger.error(f"sendPhoto failed: {data.get('description')} — falling back to text")
                 else:
+                    if local_path:
+                        logger.error(f"Image file not found: {local_path}")
+
+                if not sent_photo:
                     resp = await client.post(
                         f"{base}/sendMessage",
                         json={"chat_id": channel_id, "text": full_text, "parse_mode": "HTML"},
                     )
-
-                resp.raise_for_status()
-                data = resp.json()
-
-                if data.get("ok"):
-                    results[channel_id] = {
-                        "success": True,
-                        "message_id": data["result"]["message_id"],
-                    }
-                else:
-                    results[channel_id] = {"success": False, "error": data.get("description")}
+                    data = resp.json()
+                    if data.get("ok"):
+                        results[channel_id] = {
+                            "success": True,
+                            "message_id": data["result"]["message_id"],
+                        }
+                    else:
+                        results[channel_id] = {"success": False, "error": data.get("description")}
 
             except Exception as e:
                 logger.error(f"Telegram error for {channel_id}: {e}")
