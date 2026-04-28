@@ -125,8 +125,17 @@ async def auto_generate_and_publish():
         return
 
     v = variants[0]
+
+    image_path = ""
+    try:
+        from openai_service import generate_image_pollinations
+        settings = db.get_settings()
+        image_path = await generate_image_pollinations(topic, v["text"])
+    except Exception as e:
+        logger.warning(f"Auto-generate image failed (posting without image): {e}")
+
     post_id = db.create_post(
-        topic=topic, text=v["text"], image_path="",
+        topic=topic, text=v["text"], image_path=image_path,
         style="expert", hashtags=v.get("hashtags", ""),
         status="draft", scheduled_at=None,
     )

@@ -13,17 +13,75 @@ IMAGES_DIR = Path(os.getenv("IMAGES_DIR", "images"))
 IMAGES_DIR.mkdir(exist_ok=True, parents=True)
 
 STYLE_PROMPTS = {
-    "expert": "Экспертный стиль: профессиональный тон, конкретные факты и цифры, демонстрация компетентности компании.",
-    "casual": "Живой разговорный стиль: как будто объясняешь другу, с реальными примерами из жизни предпринимателя.",
-    "case": 'Формат кейса: "Ситуация клиента → Проблема → Как Seven-X решила → Конкретный результат". Реалистичная история.',
-    "faq": "Формат FAQ: Популярный вопрос о ВЭД/международных платежах → Чёткий развёрнутый ответ от эксперта Seven-X.",
+    "expert": """\
+Экспертный продающий стиль.
+Структура:
+1. Первая строка — острый заголовок: боль/вопрос + эмодзи
+2. 2-3 конкретных преимущества Seven-X (цифры, скорость, выгода)
+3. Призыв к действию — написать Артёму
+
+Используй <b>жирный</b> для заголовка и ключевых фактов.
+Эмодзи — только по делу, не более 4 штук.""",
+
+    "casual": """\
+Живой разговорный стиль — как друг, который в теме.
+Структура:
+1. Реальная ситуация / проблема предпринимателя — с иронией или сочувствием
+2. «Вот как это решает Seven-X» — просто и конкретно
+3. Мягкий призыв — «напиши Артёму, расскажет»
+
+Используй <b>жирный</b> для ключевых моментов. Разговорные обороты, без канцелярита.""",
+
+    "case": """\
+Формат мини-кейса.
+Структура:
+1. <b>Ситуация:</b> конкретная проблема реального клиента (без имён)
+2. <b>Решение:</b> что сделала Seven-X — конкретные шаги
+3. <b>Результат:</b> цифры, скорость, выгода
+4. CTA: «У вас похожая задача? → Артём»
+
+Всё конкретно, правдоподобно, без воды.""",
+
+    "faq": """\
+Формат вопрос-ответ.
+Структура:
+1. <b>❓ Вопрос</b> — реальный вопрос предпринимателя о ВЭД/платежах
+2. <b>💡 Ответ</b> — чёткий, экспертный, с конкретикой от Seven-X
+3. Финал: «Остались вопросы? Пишите Артёму»
+
+Вопрос должен быть острым, ответ — исчерпывающим.""",
 }
 
+SYSTEM_PROMPT = """\
+Ты — опытный копирайтер Telegram-канала компании Seven-X, ведущего платёжного агента для ВЭД.
+
+ФАКТЫ о компании (используй их):
+• 12 лет на рынке, $4 млрд+ оборот импортных сделок
+• 40+ компаний-плательщиков по всему миру
+• Валюты: USD, EUR, CNY (юань), AED (дирхам)
+• Рубли утром → платёжное поручение вечером
+• Агентская схема и договор поставки
+• Санкционные товары — без российского следа
+• Выкуп валютной выручки с доплатой 1–3%
+• Возврат до 40% НДС из Китая рублями в РФ
+• Переводы: Alipay, WeChat, наличные, крипта
+• Контакт: Артём, +7 967 202-55-54, artem@seven-x.ru
+• Менеджер на связи 24/7
+
+ПРАВИЛА:
+- Пиши на русском
+- Форматирование HTML: <b>жирный</b>, <i>курсив</i>
+- Длина поста: 300–600 символов (это лимит подписи к фото в Telegram)
+- Хэштеги: 3–4 штуки, отдельной строкой в поле hashtags
+- Каждый вариант — уникальная структура и подача
+- Всегда заканчивай CTA с контактом Артёма"""
+
 IMAGE_PROMPT_BASE = (
-    "Professional business digital illustration for a VED (foreign trade) financial services company. "
-    "Dark green (#1a3328) and teal (#2d6a4f) color palette, modern corporate aesthetic. "
-    "Abstract geometric shapes, global finance and international trade symbolism, currency exchange, "
-    "world map elements, clean minimal design. High quality render. Absolutely NO text or letters in the image."
+    "Professional business illustration for a Russian foreign trade payment company. "
+    "Deep forest green (#0f2018) background, gold and emerald accent colors. "
+    "Concepts: international money transfer, global trade routes, currency exchange. "
+    "Style: modern flat design with subtle geometric patterns, globe or world map elements, "
+    "currency symbols (¥ $ € ₽), clean corporate look. High quality. NO text or letters."
 )
 
 DEFAULT_MODELS = {
@@ -43,33 +101,29 @@ async def generate_text_variants(
     style_prompt = STYLE_PROMPTS.get(style, STYLE_PROMPTS["expert"])
     currency_block = f"\n\nВключи в пост актуальные курсы валют:\n{currency_text}" if currency_text else ""
 
-    user_prompt = f"""Напиши 3 совершенно разных варианта Telegram-поста на тему: "{topic}"
+    system = brand_voice.strip() if brand_voice.strip() else SYSTEM_PROMPT
+
+    user_prompt = f"""Напиши 3 разных продающих Telegram-поста на тему: «{topic}»
 
 {style_prompt}{currency_block}
 
-Требования:
-- Каждый вариант уникален по структуре и подаче
-- Эмодзи использовать уместно, не перегружать
-- Длина: 200–900 символов
-- Хэштеги: 3–5 штук, mix русских и английских
-
-Ответ строго в JSON:
+Ответ строго в JSON (ничего лишнего):
 {{
   "variants": [
-    {{"text": "текст поста", "hashtags": "#хэштег1 #хэштег2 #хэштег3"}},
-    {{"text": "текст поста", "hashtags": "#хэштег1 #хэштег2 #хэштег3"}},
-    {{"text": "текст поста", "hashtags": "#хэштег1 #хэштег2 #хэштег3"}}
+    {{"text": "текст поста с HTML-тегами", "hashtags": "#тег1 #тег2 #тег3"}},
+    {{"text": "текст поста с HTML-тегами", "hashtags": "#тег1 #тег2 #тег3"}},
+    {{"text": "текст поста с HTML-тегами", "hashtags": "#тег1 #тег2 #тег3"}}
   ]
 }}"""
 
     response = await client.chat.completions.create(
         model=model,
         messages=[
-            {"role": "system", "content": brand_voice},
+            {"role": "system", "content": system},
             {"role": "user", "content": user_prompt},
         ],
         response_format={"type": "json_object"},
-        temperature=0.88,
+        temperature=0.85,
     )
 
     result = json.loads(response.choices[0].message.content)
@@ -102,7 +156,7 @@ async def generate_image(topic: str, post_text: str, client: AsyncOpenAI) -> str
 async def generate_image_pollinations(topic: str, post_text: str) -> str:
     prompt = f"{IMAGE_PROMPT_BASE} Topic: {topic}."
     encoded = urllib.parse.quote(prompt)
-    url = f"https://image.pollinations.ai/prompt/{encoded}?width=1024&height=1024&nologo=true&enhance=true&model=flux"
+    url = f"https://image.pollinations.ai/prompt/{encoded}?width=1024&height=1024&nologo=true&model=flux-schnell"
 
     filename = f"{uuid.uuid4()}.jpg"
     filepath = IMAGES_DIR / filename

@@ -27,13 +27,13 @@ async def send_post(
                     with open(local_path, "rb") as photo:
                         resp = await client.post(
                             f"{base}/sendPhoto",
-                            data={"chat_id": channel_id, "caption": full_text},
-                            files={"photo": ("image.png", photo, "image/png")},
+                            data={"chat_id": channel_id, "caption": full_text, "parse_mode": "HTML"},
+                            files={"photo": ("image.jpg", photo, "image/jpeg")},
                         )
                 else:
                     resp = await client.post(
                         f"{base}/sendMessage",
-                        json={"chat_id": channel_id, "text": full_text},
+                        json={"chat_id": channel_id, "text": full_text, "parse_mode": "HTML"},
                     )
 
                 resp.raise_for_status()
