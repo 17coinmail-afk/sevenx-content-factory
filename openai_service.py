@@ -230,56 +230,69 @@ def _add_branding(filepath: Path, headline: str):
         img = Image.open(filepath).convert("RGB")
         W, H = img.size
 
-        hook_sz  = max(56, W // 15)
-        brand_sz = max(28, W // 34)
+        hook_sz  = max(78, W // 11)   # large — fills ~25% of frame width per word
+        brand_sz = max(34, W // 26)
         font_h = _get_font(hook_sz)
         font_b = _get_font(brand_sz)
 
-        # Extract hook: first sentence, strip HTML, max 52 chars
+        # Extract hook: first 5 words only (thumbnail best practice: ≤5 words)
         clean = re.sub(r"<[^>]+>", "", headline).strip()
         first = re.split(r"[.!?\n]", clean)[0].strip()
-        hook  = first[:52] + ("…" if len(first) > 52 else "")
+        words = first.split()
+        hook  = " ".join(words[:5]) + ("…" if len(words) > 5 else "")
 
-        # ── Bottom gradient (transparent → dark green) ─────────────────────
+        # ── Deep bottom gradient (more opaque for text readability) ────────
         grad = Image.new("RGBA", (W, H), (0, 0, 0, 0))
         gd   = ImageDraw.Draw(grad)
-        g0   = int(H * 0.38)
+        g0   = int(H * 0.42)
         for y in range(g0, H):
-            a = int(235 * ((y - g0) / (H - g0)) ** 0.65)
+            a = int(252 * ((y - g0) / (H - g0)) ** 0.50)
             gd.line([(0, y), (W, y)], fill=(5, 14, 9, a))
         img = Image.alpha_composite(img.convert("RGBA"), grad).convert("RGB")
 
         draw = ImageDraw.Draw(img)
 
-        # ── Wrap hook text ─────────────────────────────────────────────────
-        ml    = int(W * 0.06)           # left margin
-        max_w = int(W * 0.88)
+        ml    = int(W * 0.07)
+        max_w = int(W * 0.86)
         lines = _wrap(draw, hook, font_h, max_w)
 
-        lh           = int(hook_sz * 1.22)
-        total_h      = len(lines) * lh
-        brand_y      = H - int(H * 0.07) - brand_sz
-        text_bottom  = brand_y - int(H * 0.045)
-        text_top     = text_bottom - total_h
+        lh          = int(hook_sz * 1.18)
+        total_h     = len(lines) * lh
+        brand_y     = H - int(H * 0.065) - brand_sz
+        text_bottom = brand_y - int(H * 0.04)
+        text_top    = text_bottom - total_h
 
-        # ── Draw each hook line (shadow + white) ───────────────────────────
+        stroke = max(4, hook_sz // 16)   # thick black outline — industry standard
+
+        # ── Hook text: white fill + black stroke (no separate shadow pass) ─
         for i, line in enumerate(lines):
             y = text_top + i * lh
-            draw.text((ml + 3, y + 3), line, fill=(0, 0, 0),       font=font_h)  # shadow
-            draw.text((ml,     y    ), line, fill=(255, 255, 255),  font=font_h)  # white
+            draw.text(
+                (ml, y), line,
+                fill=(255, 255, 255),
+                font=font_h,
+                stroke_width=stroke,
+                stroke_fill=(0, 0, 0),
+            )
 
-        # ── Green accent line left of text ─────────────────────────────────
-        bar_x = ml - int(W * 0.022)
-        bar_w = max(5, int(W * 0.008))
+        # ── Accent bar: emerald vertical line left of text ─────────────────
+        bar_x = ml - int(W * 0.026)
+        bar_w = max(7, int(W * 0.010))
         draw.rectangle(
-            [(bar_x, text_top), (bar_x + bar_w, text_top + total_h)],
+            [(bar_x, text_top - 6), (bar_x + bar_w, text_top + total_h + 6)],
             fill=(82, 183, 136),
         )
 
-        # ── SEVEN-X bottom left ────────────────────────────────────────────
-        draw.text((ml, brand_y), "SEVEN-X", fill=(82, 183, 136), font=font_b)
+        # ── SEVEN-X wordmark bottom-left ───────────────────────────────────
+        draw.text(
+            (ml, brand_y), "SEVEN-X",
+            fill=(82, 183, 136),
+            font=font_b,
+            stroke_width=max(2, brand_sz // 20),
+            stroke_fill=(0, 0, 0),
+        )
 
-        img.save(filepath, "JPEG", quality=90)
+        img.save(filepath, "JPEG", quality=92)
     except Exception as e:
         logger.warning(f"Branding overlay failed: {e}")
 
