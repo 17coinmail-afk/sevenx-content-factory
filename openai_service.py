@@ -230,42 +230,55 @@ def _add_branding(filepath: Path, headline: str):
         img = Image.open(filepath).convert("RGB")
         W, H = img.size
 
-        # Font sizes: brand small (label), headline large (content)
-        brand_sz    = max(28, W // 32)
-        headline_sz = max(40, W // 22)
+        title_sz = max(58, W // 14)   # large caps headline
+        sub_sz   = max(22, W // 40)   # contact subline
+        brand_sz = max(30, W // 30)   # SEVEN-X
+        font_t = _get_font(title_sz)
+        font_s = _get_font(sub_sz)
         font_b = _get_font(brand_sz)
-        font_h = _get_font(headline_sz)
 
-        # Full first sentence as headline (news-style, not truncated)
+        # First sentence → ALL CAPS headline
         clean = re.sub(r"<[^>]+>", "", headline).strip()
-        text  = re.split(r"[.!?\n]", clean)[0].strip()
+        title = re.split(r"[.!?\n]", clean)[0].strip().upper()
 
-        # ── Solid dark bar (lower third — news channel standard) ───────────
-        bar_h   = int(H * 0.30)
-        bar_top = H - bar_h
-        panel   = Image.new("RGBA", (W, bar_h), (8, 22, 13, 252))   # near-black green
-        img     = img.convert("RGBA")
-        img.paste(panel, (0, bar_top), panel)
-        img     = img.convert("RGB")
-        draw    = ImageDraw.Draw(img)
+        # ── Two-layer dark overlay (like reference) ─────────────────────────
+        # Layer 1: mild full-image darkening
+        dim = Image.new("RGBA", (W, H), (0, 0, 0, 100))
+        img = Image.alpha_composite(img.convert("RGBA"), dim)
 
-        # Thin emerald separator line at top of bar
-        sep_h = max(4, int(H * 0.005))
-        draw.rectangle([(0, bar_top), (W, bar_top + sep_h)], fill=(82, 183, 136))
+        # Layer 2: stronger gradient bottom 65%
+        grad = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        gd   = ImageDraw.Draw(grad)
+        g0   = int(H * 0.35)
+        for y in range(g0, H):
+            t = (y - g0) / (H - g0)
+            a = int(185 * (t ** 0.6))
+            gd.line([(0, y), (W, y)], fill=(4, 10, 7, a))
+        img = Image.alpha_composite(img, grad).convert("RGB")
+        draw = ImageDraw.Draw(img)
 
-        pad_x     = int(W * 0.055)
-        inner_top = bar_top + sep_h + int(bar_h * 0.13)
+        pad_x = int(W * 0.07)
 
-        # SEVEN-X label — small, emerald, uppercase
-        draw.text((pad_x, inner_top), "SEVEN-X", fill=(82, 183, 136), font=font_b)
-        inner_top += brand_sz + int(brand_sz * 0.5)
+        # ── SEVEN-X — centered at very bottom ─────────────────────────────
+        brand_text = "SEVEN-X"
+        bw = _tw(draw, brand_text, font_b)
+        brand_y = H - int(H * 0.07)
+        draw.text(((W - bw) // 2, brand_y), brand_text, fill=(255, 255, 255), font=font_b)
 
-        # Headline — white, larger, left-aligned, max 3 lines
-        lines = _wrap(draw, text, font_h, W - pad_x * 2)[:3]
-        lh    = int(headline_sz * 1.22)
-        for line in lines:
-            draw.text((pad_x, inner_top), line, fill=(255, 255, 255), font=font_h)
-            inner_top += lh
+        # ── Contact subline ────────────────────────────────────────────────
+        sub_text = "seven-x.ru  •  Артём: +7 967 202-55-54"
+        sub_y = brand_y - sub_sz - int(H * 0.025)
+        draw.text((pad_x, sub_y), sub_text, fill=(180, 180, 180), font=font_s)
+
+        # ── Title: emerald, ALL CAPS, large, left-aligned ─────────────────
+        max_w  = int(W * 0.86)
+        lines  = _wrap(draw, title, font_t, max_w)[:3]
+        lh     = int(title_sz * 1.15)
+        total  = len(lines) * lh
+        title_y = sub_y - int(H * 0.03) - total
+
+        for i, line in enumerate(lines):
+            draw.text((pad_x, title_y + i * lh), line, fill=(82, 183, 136), font=font_t)
 
         img.save(filepath, "JPEG", quality=92)
     except Exception as e:
