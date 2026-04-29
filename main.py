@@ -187,7 +187,7 @@ app.mount("/images", StaticFiles(directory=str(IMAGES_DIR)), name="images")
 
 @app.get("/health")
 async def health():
-    return {"ok": True}
+    return {"ok": True, "storage": "postgresql" if db.IS_PG else "sqlite_ephemeral"}
 
 
 @app.get("/")

@@ -426,6 +426,12 @@
         <p class="text-[#5a8a6a] text-sm mt-0.5">Конфигурация системы</p>
       </div>
 
+      <!-- Storage warning -->
+      <div x-show="storageType==='sqlite_ephemeral'"
+           class="bg-yellow-900/20 border border-yellow-600/40 rounded-2xl p-4 mb-4 text-xs text-yellow-300">
+        ⚠️ <b>Данные хранятся в SQLite</b> — при перезапуске сервера они сбросятся. Подключите PostgreSQL в Render Dashboard → вкладка Environment.
+      </div>
+
       <!-- AI Provider -->
       <div class="bg-[#0f2018] border border-[#1a3328] rounded-2xl p-5 mb-4">
         <h2 class="text-sm font-semibold mb-3">🤖 AI Провайдер</h2>
@@ -443,9 +449,12 @@
         <div class="space-y-3">
           <div>
             <label class="block text-xs text-[#5a8a6a] mb-1">API Key</label>
-            <input x-model="sf.openai_api_key" type="password"
-                   :placeholder="settings.openai_api_key_masked||'ключ от провайдера'"
+            <input x-model="sf.openai_api_key" type="password" placeholder="Введите новый ключ чтобы изменить"
                    class="w-full bg-[#071410] border border-[#1a3328] text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-[#52b788] transition-colors placeholder-[#2d5040]">
+            <div x-show="settings.openai_api_key_masked" class="mt-1.5 flex items-center gap-1.5">
+              <span class="text-[#52b788] text-xs">✓ Сохранён:</span>
+              <span class="text-[#52b788] text-xs font-mono" x-text="settings.openai_api_key_masked"></span>
+            </div>
           </div>
           <div>
             <label class="block text-xs text-[#5a8a6a] mb-1">Base URL <span class="text-[#3d6b52] font-normal">(пусто = OpenAI)</span></label>
@@ -483,11 +492,14 @@
             <div class="text-[#5a8a6a] text-[10px] mt-0.5">OpenAI ключ</div>
           </button>
         </div>
-        <div x-show="sf.image_provider==='pexels'">
+        <div>
           <label class="block text-xs text-[#5a8a6a] mb-1">Pexels API Key <a href="https://www.pexels.com/api/" target="_blank" class="text-[#52b788] hover:underline">→ получить бесплатно</a></label>
-          <input x-model="sf.pexels_api_key" type="password"
-                 :placeholder="settings.pexels_api_key_masked||'вставьте ключ от pexels.com/api'"
+          <input x-model="sf.pexels_api_key" type="password" placeholder="Введите новый ключ чтобы изменить"
                  class="w-full bg-[#071410] border border-[#1a3328] text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-[#52b788] transition-colors placeholder-[#2d5040]">
+          <div x-show="settings.pexels_api_key_masked" class="mt-1.5 flex items-center gap-1.5">
+            <span class="text-[#52b788] text-xs">✓ Сохранён:</span>
+            <span class="text-[#52b788] text-xs font-mono" x-text="settings.pexels_api_key_masked"></span>
+          </div>
         </div>
       </div>
 
@@ -497,11 +509,14 @@
         <div>
           <label class="block text-xs text-[#5a8a6a] mb-1">Bot Token</label>
           <div class="flex gap-2">
-            <input x-model="sf.telegram_bot_token" type="password"
-                   :placeholder="settings.telegram_bot_token_masked||'123456:ABC...'"
+            <input x-model="sf.telegram_bot_token" type="password" placeholder="Введите новый токен чтобы изменить"
                    class="flex-1 bg-[#071410] border border-[#1a3328] text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-[#52b788] transition-colors placeholder-[#2d5040]">
             <button @click="testTg()"
                     class="bg-[#071410] border border-[#1a3328] hover:border-[#2d6a4f] text-[#5a8a6a] text-sm px-4 py-2.5 rounded-xl transition-all flex-shrink-0">Тест</button>
+          </div>
+          <div x-show="settings.telegram_bot_token_masked" class="mt-1.5 flex items-center gap-1.5">
+            <span class="text-[#52b788] text-xs">✓ Сохранён:</span>
+            <span class="text-[#52b788] text-xs font-mono" x-text="settings.telegram_bot_token_masked"></span>
           </div>
         </div>
       </div>
@@ -657,6 +672,7 @@ function app() {
     // Data
     currency: {},
     settings: {},
+    storageType: '',
     queuePosts: [], histPosts: [], draftPosts: [],
     queueCount: 0,
     histFilter: 'all',
@@ -689,8 +705,16 @@ function app() {
 
     // ── Init ────────────────────────────────────────────────────────────────
     async init() {
-      await Promise.all([this.loadCurrency(), this.loadSettings()]);
+      await Promise.all([this.loadCurrency(), this.loadSettings(), this.loadStorageType()]);
       this.loadQueue();
+    },
+
+    async loadStorageType() {
+      try {
+        const r = await fetch('/health');
+        const d = await r.json();
+        this.storageType = d.storage || '';
+      } catch(e) {}
     },
 
     async switchTab(id) {
