@@ -194,9 +194,17 @@ async def auto_generate_and_publish() -> int:
 
     image_path = ""
     try:
-        if pexels_key:
+        if image_provider == "pexels" and pexels_key:
             from openai_service import fetch_image_pexels
             image_path = await fetch_image_pexels(topic, pexels_key, contact_info=contact_info, hook=hook)
+        elif image_provider == "openai":
+            from openai_service import generate_image as gen_img, _add_branding
+            from pathlib import Path as _Path
+            img_path_str = await gen_img(topic, v["text"], client)
+            # Apply branding to DALL-E images (saved as PNG, re-save with overlay)
+            local = IMAGES_DIR / img_path_str[8:]
+            _add_branding(local, topic, contact_info=contact_info, hook=hook)
+            image_path = img_path_str
         else:
             from openai_service import generate_image_pollinations
             image_path = await generate_image_pollinations(topic, v["text"], contact_info=contact_info, hook=hook)
@@ -399,13 +407,16 @@ async def generate_image(req: GenerateImageIn):
     hook = req.image_hook or ""
 
     try:
-        if pexels_key:
+        if image_provider == "pexels" and pexels_key:
             url = await fetch_image_pexels(req.topic, pexels_key, contact_info=contact_info, hook=hook)
         elif image_provider == "openai":
+            from openai_service import _add_branding
             client, _ = _make_ai_client(s)
             url = await gen_img(req.topic, req.post_text, client)
+            local = IMAGES_DIR / url[8:]
+            _add_branding(local, req.topic, contact_info=contact_info, hook=hook)
         else:
-            url = await generate_image_pollinations(req.topic, req.post_text, contact_info=contact_info, hook=hook)
+            url = await generate_image_pollinations(req.topic, req.post_text or req.topic, contact_info=contact_info, hook=hook)
         return {"image_url": url}
     except Exception as e:
         logger.error(f"Image error: {e}")
