@@ -27,6 +27,29 @@ IMAGES_DIR = Path(os.getenv("IMAGES_DIR", "images"))
 IMAGES_DIR.mkdir(exist_ok=True, parents=True)
 Path("static").mkdir(exist_ok=True)
 
+# Mapping: settings DB key → environment variable name
+_ENV_MAP = {
+    "openai_api_key":    "OPENAI_API_KEY",
+    "telegram_bot_token": "TELEGRAM_BOT_TOKEN",
+    "channel_1_id":      "CHANNEL_1_ID",
+    "channel_2_id":      "CHANNEL_2_ID",
+    "pexels_api_key":    "PEXELS_API_KEY",
+    "ai_base_url":       "AI_BASE_URL",
+    "ai_model":          "AI_MODEL",
+    "contact_info":      "CONTACT_INFO",
+    "brand_voice":       "BRAND_VOICE",
+}
+
+
+def _effective_settings() -> dict:
+    """Return DB settings with env vars overriding where set (env = source of truth)."""
+    s = _effective_settings()
+    for key, env_name in _ENV_MAP.items():
+        val = os.getenv(env_name, "").strip()
+        if val:
+            s[key] = val
+    return s
+
 PRESET_TOPICS = [
     "Как платить за товары из Китая в 2025 году",
     "Почему переводы в юанях выгоднее долларов",
@@ -90,10 +113,10 @@ async def publish_post(post_id: int) -> str:
     if not post or post["status"] == "published":
         return ""
 
-    settings = db.get_settings()
-    bot_token = os.getenv("TELEGRAM_BOT_TOKEN") or settings.get("telegram_bot_token", "")
-    ch1 = os.getenv("CHANNEL_1_ID") or settings.get("channel_1_id", "")
-    ch2 = os.getenv("CHANNEL_2_ID") or settings.get("channel_2_id", "")
+    settings = _effective_settings()
+    bot_token = settings.get("telegram_bot_token", "")
+    ch1 = settings.get("channel_1_id", "")
+    ch2 = settings.get("channel_2_id", "")
     channels = list(dict.fromkeys(c for c in [ch1, ch2] if c))
 
     if not bot_token or not channels:
@@ -134,8 +157,8 @@ async def auto_generate_and_publish() -> int:
     from openai import AsyncOpenAI
     from openai_service import generate_text_variants, DEFAULT_MODELS
 
-    settings = db.get_settings()
-    api_key = os.getenv("OPENAI_API_KEY") or settings.get("openai_api_key", "")
+    settings = _effective_settings()
+    api_key = settings.get("openai_api_key", "")
     if not api_key:
         raise ValueError("AI API ключ не настроен — добавьте его в Настройках")
 
@@ -186,7 +209,7 @@ async def auto_post():
         await publish_post(posts[0]["id"])  # return value intentionally ignored for scheduler
         return
 
-    settings = db.get_settings()
+    settings = _effective_settings()
     if settings.get("auto_generate_enabled", "false") == "true":
         await auto_generate_and_publish()
 
@@ -198,7 +221,7 @@ async def lifespan(app: FastAPI):
     db.init_db()
     sched.start(publish_callback=publish_post)
 
-    settings = db.get_settings()
+    settings = _effective_settings()
     times = json.loads(settings.get("auto_post_times", '["10:00","19:00"]'))
     enabled = settings.get("auto_post_enabled", "false") == "true"
     sched.apply_auto_post(times, enabled, auto_post)
@@ -229,16 +252,18 @@ async def root():
 
 @app.get("/api/settings")
 async def get_settings():
-    s = db.get_settings()
+    s = _effective_settings()
+
+    def _mask(val: str, n: int) -> str:
+        suffix = " (env)" if any(os.getenv(e, "") == val for e in _ENV_MAP.values()) else ""
+        return (val[:n] + "..." + val[-4:] if len(val) > n + 4 else val[:n] + "...") + suffix
+
     if s.get("openai_api_key"):
-        k = s["openai_api_key"]
-        s["openai_api_key_masked"] = k[:7] + "..." + k[-4:] if len(k) > 11 else "***"
+        s["openai_api_key_masked"] = _mask(s["openai_api_key"], 7)
     if s.get("telegram_bot_token"):
-        t = s["telegram_bot_token"]
-        s["telegram_bot_token_masked"] = t[:8] + "..." if len(t) > 8 else "***"
+        s["telegram_bot_token_masked"] = _mask(s["telegram_bot_token"], 8)
     if s.get("pexels_api_key"):
-        p = s["pexels_api_key"]
-        s["pexels_api_key_masked"] = p[:6] + "..." if len(p) > 6 else "***"
+        s["pexels_api_key_masked"] = _mask(s["pexels_api_key"], 6)
     return s
 
 
@@ -265,7 +290,7 @@ async def save_settings(data: SettingsIn):
         db.update_setting(k, v)
 
     if "auto_post_enabled" in updates or "auto_post_times" in updates:
-        s = db.get_settings()
+        s = _effective_settings()
         times = json.loads(s.get("auto_post_times", '["10:00","19:00"]'))
         enabled = s.get("auto_post_enabled", "false") == "true"
         sched.apply_auto_post(times, enabled, auto_post)
@@ -275,7 +300,7 @@ async def save_settings(data: SettingsIn):
 
 @app.post("/api/test-telegram")
 async def test_telegram():
-    s = db.get_settings()
+    s = _effective_settings()
     token = os.getenv("TELEGRAM_BOT_TOKEN") or s.get("telegram_bot_token", "")
     if not token:
         raise HTTPException(400, "Bot token not configured")
@@ -322,7 +347,7 @@ def _resolve_model(s: dict, base_url: Optional[str]) -> str:
 async def generate(req: GenerateIn):
     from openai_service import generate_text_variants
 
-    s = db.get_settings()
+    s = _effective_settings()
     client, base_url = _make_ai_client(s)
     model = _resolve_model(s, base_url)
 
@@ -356,7 +381,7 @@ class GenerateImageIn(BaseModel):
 async def generate_image(req: GenerateImageIn):
     from openai_service import generate_image as gen_img, generate_image_pollinations, fetch_image_pexels
 
-    s = db.get_settings()
+    s = _effective_settings()
     image_provider = s.get("image_provider", "pollinations")
     contact_info = s.get("contact_info", "")
     pexels_key = s.get("pexels_api_key", "").strip()
@@ -477,7 +502,7 @@ async def calendar():
 
 @app.post("/api/autopilot/trigger")
 async def trigger_autopilot():
-    settings = db.get_settings()
+    settings = _effective_settings()
     bot_token = os.getenv("TELEGRAM_BOT_TOKEN") or settings.get("telegram_bot_token", "")
     ch1 = os.getenv("CHANNEL_1_ID") or settings.get("channel_1_id", "")
 
