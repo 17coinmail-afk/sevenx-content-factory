@@ -419,6 +419,7 @@ class PostIn(BaseModel):
     text: str
     image_path: Optional[str] = ""
     style: Optional[str] = ""
+    post_format: Optional[str] = "promo"
     hashtags: Optional[str] = ""
     status: str = "draft"
     scheduled_at: Optional[str] = None
@@ -441,7 +442,8 @@ async def get_post(post_id: int):
 async def create_post(req: PostIn):
     pid = db.create_post(
         topic=req.topic, text=req.text, image_path=req.image_path,
-        style=req.style, hashtags=req.hashtags, status=req.status,
+        style=req.style, post_format=req.post_format or "promo",
+        hashtags=req.hashtags, status=req.status,
         scheduled_at=req.scheduled_at,
     )
     return {"id": pid, "success": True}
