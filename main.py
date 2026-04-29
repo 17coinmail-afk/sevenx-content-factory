@@ -128,15 +128,16 @@ async def auto_generate_and_publish() -> int:
         raise ValueError("AI не вернул варианты текста")
 
     v = variants[0]
+    hook = v.get("image_hook", "")
 
     image_path = ""
     try:
-        if image_provider == "pexels" and pexels_key:
+        if pexels_key:
             from openai_service import fetch_image_pexels
-            image_path = await fetch_image_pexels(topic, pexels_key, contact_info=contact_info)
+            image_path = await fetch_image_pexels(topic, pexels_key, contact_info=contact_info, hook=hook)
         else:
             from openai_service import generate_image_pollinations
-            image_path = await generate_image_pollinations(topic, v["text"], contact_info=contact_info)
+            image_path = await generate_image_pollinations(topic, v["text"], contact_info=contact_info, hook=hook)
     except Exception as e:
         logger.warning(f"Auto-generate image failed (posting without image): {e}")
 
@@ -318,6 +319,7 @@ async def generate(req: GenerateIn):
 class GenerateImageIn(BaseModel):
     topic: str
     post_text: Optional[str] = ""
+    image_hook: Optional[str] = ""
 
 
 @app.post("/api/generate/image")
@@ -328,15 +330,16 @@ async def generate_image(req: GenerateImageIn):
     image_provider = s.get("image_provider", "pollinations")
     contact_info = s.get("contact_info", "")
     pexels_key = s.get("pexels_api_key", "").strip()
+    hook = req.image_hook or ""
 
     try:
-        if image_provider == "pexels" and pexels_key:
-            url = await fetch_image_pexels(req.topic, pexels_key, contact_info=contact_info)
+        if pexels_key:
+            url = await fetch_image_pexels(req.topic, pexels_key, contact_info=contact_info, hook=hook)
         elif image_provider == "openai":
             client, _ = _make_ai_client(s)
             url = await gen_img(req.topic, req.post_text, client)
         else:
-            url = await generate_image_pollinations(req.topic, req.post_text, contact_info=contact_info)
+            url = await generate_image_pollinations(req.topic, req.post_text, contact_info=contact_info, hook=hook)
         return {"image_url": url}
     except Exception as e:
         logger.error(f"Image error: {e}")

@@ -176,11 +176,13 @@ async def generate_text_variants(
 Ответ строго в JSON (ничего лишнего):
 {{
   "variants": [
-    {{"text": "текст поста с HTML-тегами и пустыми строками между абзацами", "hashtags": "#тег1 #тег2 #тег3"}},
-    {{"text": "текст поста с HTML-тегами и пустыми строками между абзацами", "hashtags": "#тег1 #тег2 #тег3"}},
-    {{"text": "текст поста с HTML-тегами и пустыми строками между абзацами", "hashtags": "#тег1 #тег2 #тег3"}}
+    {{"text": "текст поста с HTML-тегами и пустыми строками между абзацами", "hashtags": "#тег1 #тег2 #тег3", "image_hook": "3-5 слов на картинку"}},
+    {{"text": "...", "hashtags": "...", "image_hook": "..."}},
+    {{"text": "...", "hashtags": "...", "image_hook": "..."}}
   ]
-}}"""
+}}
+
+image_hook — максимум 5 слов, провокационный крючок для картинки (без знаков препинания). Должен заставить остановиться и прочитать. Пример: «Банки не работают а мы работаем» → «БАНКИ НЕ РАБОТАЮТ»."""
 
     response = await client.chat.completions.create(
         model=model,
@@ -294,7 +296,7 @@ def _wrap(draw, text, font, max_w):
     return lines or [text]
 
 
-def _add_branding(filepath: Path, headline: str, contact_info: str = ""):
+def _add_branding(filepath: Path, headline: str, contact_info: str = "", hook: str = ""):
     try:
         from PIL import Image, ImageDraw, ImageFont
         import re
@@ -302,7 +304,7 @@ def _add_branding(filepath: Path, headline: str, contact_info: str = ""):
         img = Image.open(filepath).convert("RGB")
         W, H = img.size
 
-        title_sz = max(52, W // 14)
+        title_sz = max(72, W // 10)
         sub_sz   = max(20, W // 44)
         brand_sz = max(26, W // 34)
         font_t = _get_font(title_sz, bold=True)
@@ -312,9 +314,12 @@ def _add_branding(filepath: Path, headline: str, contact_info: str = ""):
         is_tt = isinstance(font_t, ImageFont.FreeTypeFont)
         logger.info(f"Branding start: {W}x{H} TrueType={is_tt} path={_BOLD_CANDIDATES[0]}")
 
-        clean = re.sub(r"<[^>]+>", "", headline).strip()
-        first = re.split(r"[.!?\n]", clean)[0].strip()
-        title = first.upper()
+        if hook and hook.strip():
+            title = hook.strip().upper()
+        else:
+            clean = re.sub(r"<[^>]+>", "", headline).strip()
+            first = re.split(r"[.!?\n]", clean)[0].strip()
+            title = first.upper()
 
         px    = int(W * 0.06)   # left margin — all text starts here
         max_w = W - px * 2
@@ -378,7 +383,7 @@ def _add_branding(filepath: Path, headline: str, contact_info: str = ""):
         logger.error(f"Branding failed: {e}", exc_info=True)
 
 
-async def fetch_image_pexels(topic: str, api_key: str, contact_info: str = "") -> str:
+async def fetch_image_pexels(topic: str, api_key: str, contact_info: str = "", hook: str = "") -> str:
     import random
     topic_lower = topic.lower()
     query = "international business finance"
@@ -414,12 +419,12 @@ async def fetch_image_pexels(topic: str, api_key: str, contact_info: str = "") -
         img_resp.raise_for_status()
         filepath.write_bytes(img_resp.content)
 
-    _add_branding(filepath, topic, contact_info=contact_info)
+    _add_branding(filepath, topic, contact_info=contact_info, hook=hook)
     logger.info(f"Pexels image saved: {filename}")
     return f"/images/{filename}"
 
 
-async def generate_image_pollinations(topic: str, post_text: str, contact_info: str = "") -> str:
+async def generate_image_pollinations(topic: str, post_text: str, contact_info: str = "", hook: str = "") -> str:
     import random
     prompt  = _build_image_prompt(topic)
     encoded = urllib.parse.quote(prompt)
@@ -440,5 +445,5 @@ async def generate_image_pollinations(topic: str, post_text: str, contact_info: 
             raise ValueError(f"Pollinations returned too-small response ({len(resp.content)} bytes)")
         filepath.write_bytes(resp.content)
 
-    _add_branding(filepath, post_text or topic, contact_info=contact_info)
+    _add_branding(filepath, post_text or topic, contact_info=contact_info, hook=hook)
     return f"/images/{filename}"

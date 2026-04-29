@@ -818,7 +818,7 @@ function app() {
       try {
         const r = await fetch('/api/generate/image', {
           method: 'POST', headers: {'Content-Type':'application/json'},
-          body: JSON.stringify({ topic: this.gen.topic, post_text: this.gen.variants[i].text })
+          body: JSON.stringify({ topic: this.gen.topic, post_text: this.gen.variants[i].text, image_hook: this.gen.variants[i].image_hook || '' })
         });
         if (!r.ok) { const e = await r.json(); this.notify(e.detail||'Ошибка картинки', 'error'); return; }
         const d = await r.json();
