@@ -195,7 +195,7 @@
                   <input x-model="v.hashtags" placeholder="#хэштеги"
                          class="w-full bg-[#071410] border border-[#1a3328] text-[#5a8a6a] rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-[#6bbf8e]">
                 </div>
-                <!-- Actions -->
+                <!-- Actions row -->
                 <div class="flex gap-2 mt-3 flex-wrap">
                   <button @click="gen.editing=gen.editing===i?null:i"
                           class="bg-[#071410] border border-[#1a3328] hover:border-[#2d6a4f] text-[#5a8a6a] text-xs px-3 py-1.5 rounded-lg transition-all">
@@ -210,39 +210,37 @@
                     <span x-text="gen.imgLoading===i?'Рисуем...':'🎨 Картинка'"></span>
                   </button>
                 </div>
+
                 <!-- Image preview -->
                 <div x-show="v.image_url" class="mt-4">
                   <img :src="v.image_url" class="rounded-xl max-w-xs w-full object-cover aspect-square">
                 </div>
+
+                <!-- Publish controls — appear inline when this variant is selected -->
+                <div x-show="gen.selected===i" class="mt-4 pt-4 border-t border-[#6bbf8e]/20 fade-in">
+                  <div class="flex flex-wrap gap-2 items-center">
+                    <button @click="publishNow()" :disabled="gen.publishing"
+                            class="bg-[#2d6a4f] hover:bg-[#3d8a65] active:bg-[#245c43] disabled:opacity-40 text-white text-sm font-bold px-5 py-2.5 rounded-xl transition-all flex items-center gap-2">
+                      <svg x-show="gen.publishing" class="spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                      </svg>
+                      <span x-text="gen.publishing?'Публикуем...':'📤 Опубликовать сейчас'"></span>
+                    </button>
+                    <input type="datetime-local" x-model="gen.scheduleAt"
+                           class="bg-[#071410] border border-[#1a3328] text-white rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-[#6bbf8e]">
+                    <button @click="schedulePost()" :disabled="!gen.scheduleAt"
+                            class="bg-[#071410] border border-[#1a3328] hover:border-[#2d6a4f] disabled:opacity-40 text-[#5a8a6a] hover:text-white text-sm px-4 py-2.5 rounded-xl transition-all whitespace-nowrap">
+                      🗓 Запланировать
+                    </button>
+                    <button @click="saveDraft()"
+                            class="bg-[#071410] border border-[#1a3328] hover:border-[#2d6a4f] text-[#5a8a6a] hover:text-white text-sm px-4 py-2.5 rounded-xl transition-all">
+                      💾 Черновик
+                    </button>
+                  </div>
+                </div>
               </div>
             </template>
-
-            <!-- Publish panel -->
-            <div x-show="gen.selected!==null" class="bg-[#071410] border-2 border-[#6bbf8e]/50 rounded-2xl p-5 fade-in">
-              <div class="text-sm font-bold mb-4 text-[#6bbf8e]">📤 Публикация</div>
-              <div class="flex flex-wrap gap-3 items-center">
-                <button @click="publishNow()" :disabled="gen.publishing"
-                        class="bg-[#2d6a4f] hover:bg-[#3d8a65] active:bg-[#245c43] disabled:opacity-40 text-white text-sm font-bold px-6 py-2.5 rounded-xl transition-all flex items-center gap-2">
-                  <svg x-show="gen.publishing" class="spin w-4 h-4" fill="none" viewBox="0 0 24 24">
-                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
-                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
-                  </svg>
-                  <span x-text="gen.publishing?'Публикуем...':'📤 Опубликовать сейчас'"></span>
-                </button>
-                <div class="flex gap-2 items-center">
-                  <input type="datetime-local" x-model="gen.scheduleAt"
-                         class="bg-[#0f2018] border border-[#1a3328] text-white rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-[#6bbf8e]">
-                  <button @click="schedulePost()" :disabled="!gen.scheduleAt"
-                          class="bg-[#0f2018] border border-[#1a3328] hover:border-[#2d6a4f] disabled:opacity-40 text-[#5a8a6a] hover:text-white text-sm px-4 py-2.5 rounded-xl transition-all whitespace-nowrap">
-                    🗓 Запланировать
-                  </button>
-                </div>
-                <button @click="saveDraft()"
-                        class="bg-[#0f2018] border border-[#1a3328] hover:border-[#2d6a4f] text-[#5a8a6a] hover:text-white text-sm px-4 py-2.5 rounded-xl transition-all">
-                  💾 Черновик
-                </button>
-              </div>
-            </div>
           </div>
         </div>
 
