@@ -192,8 +192,18 @@ async def generate_text_variants(
         temperature=0.92,
     )
 
-    result = json.loads(response.choices[0].message.content)
-    return result.get("variants", [])
+    raw = response.choices[0].message.content
+    try:
+        result = json.loads(raw)
+    except json.JSONDecodeError:
+        import re
+        m = re.search(r'\{.*\}', raw, re.DOTALL)
+        result = json.loads(m.group()) if m else {}
+
+    variants = result.get("variants") or result.get("Variants") or result.get("posts") or []
+    if not variants and isinstance(result, list):
+        variants = result
+    return variants
 
 
 async def generate_image(topic: str, post_text: str, client: AsyncOpenAI) -> str:

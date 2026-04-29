@@ -345,25 +345,38 @@
 
     <!-- ═══ HISTORY ══════════════════════════════════════════════════════════ -->
     <div x-show="tab==='history'" class="p-6 fade-in">
-      <div class="mb-5">
-        <h1 class="text-xl font-bold">История</h1>
-        <p class="text-[#5a8a6a] text-sm mt-0.5">Опубликованные посты</p>
+      <div class="flex items-center justify-between mb-5">
+        <div>
+          <h1 class="text-xl font-bold">История</h1>
+          <p class="text-[#5a8a6a] text-sm mt-0.5">Все посты</p>
+        </div>
+        <div class="flex gap-2 text-xs">
+          <button @click="histFilter='all'" :class="histFilter==='all'?'bg-[#2d6a4f] text-white':'bg-[#0f2018] text-[#5a8a6a] border border-[#1a3328]'" class="px-3 py-1.5 rounded-lg transition-all">Все</button>
+          <button @click="histFilter='published'" :class="histFilter==='published'?'bg-[#2d6a4f] text-white':'bg-[#0f2018] text-[#5a8a6a] border border-[#1a3328]'" class="px-3 py-1.5 rounded-lg transition-all">Опубликованные</button>
+          <button @click="histFilter='failed'" :class="histFilter==='failed'?'bg-red-800 text-white':'bg-[#0f2018] text-[#5a8a6a] border border-[#1a3328]'" class="px-3 py-1.5 rounded-lg transition-all">Ошибки</button>
+        </div>
       </div>
 
-      <div x-show="!histPosts.length" class="bg-[#0f2018] border border-[#1a3328] rounded-2xl p-10 text-center">
+      <div x-show="!filteredHist.length" class="bg-[#0f2018] border border-[#1a3328] rounded-2xl p-10 text-center">
         <div class="text-4xl mb-3">📊</div>
-        <p class="text-[#5a8a6a] text-sm">Ещё нет опубликованных постов.</p>
+        <p class="text-[#5a8a6a] text-sm">Нет постов.</p>
       </div>
 
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        <template x-for="p in histPosts" :key="p.id">
-          <div class="bg-[#0f2018] border border-[#1a3328] rounded-2xl overflow-hidden">
+        <template x-for="p in filteredHist" :key="p.id">
+          <div :class="p.status==='failed'?'border-red-800/40':'border-[#1a3328]'" class="bg-[#0f2018] border rounded-2xl overflow-hidden">
             <div x-show="p.image_path" class="relative">
               <img :src="p.image_path" class="w-full h-44 object-cover">
-              <div class="absolute top-2 right-2 bg-[#52b788]/90 backdrop-blur text-[#071410] text-xs font-semibold px-2 py-1 rounded-lg">✓ Опубликован</div>
+              <div :class="p.status==='published'?'bg-[#52b788]/90 text-[#071410]':'bg-red-700/90 text-white'"
+                   class="absolute top-2 right-2 backdrop-blur text-xs font-semibold px-2 py-1 rounded-lg"
+                   x-text="p.status==='published'?'✓ Опубликован':'✗ Ошибка'"></div>
             </div>
             <div class="p-4">
-              <p class="text-xs text-[#52b788] mb-1" x-text="fmtDate(p.published_at)"></p>
+              <div class="flex items-center gap-2 mb-1">
+                <span :class="p.status==='published'?'text-[#52b788]':'text-red-400'" class="text-xs font-medium"
+                      x-text="p.status==='published'?'✓ Опубликован':'✗ Не отправлен'"></span>
+                <span class="text-xs text-[#3d6b52]" x-text="fmtDate(p.published_at||p.created_at)"></span>
+              </div>
               <p class="text-sm text-[#c8e6d0] line-clamp-4 leading-relaxed" x-text="p.text"></p>
               <p x-show="p.hashtags" class="text-xs text-[#3d6b52] mt-2" x-text="p.hashtags"></p>
             </div>
@@ -646,6 +659,11 @@ function app() {
     settings: {},
     queuePosts: [], histPosts: [], draftPosts: [],
     queueCount: 0,
+    histFilter: 'all',
+    get filteredHist() {
+      if (this.histFilter === 'all') return this.histPosts;
+      return this.histPosts.filter(p => p.status === this.histFilter);
+    },
 
     // Calendar
     calMonth: new Date(),
@@ -871,8 +889,18 @@ function app() {
 
     async loadHist() {
       try {
-        const r = await fetch('/api/posts?status=published');
-        this.histPosts = (await r.json()).posts;
+        const r = await fetch('/api/posts?status=published,failed');
+        const data = await r.json();
+        this.histPosts = data.posts || [];
+        // fallback: if backend doesn't support comma-filter, fetch separately
+        if (!this.histPosts.length) {
+          const [rp, rf] = await Promise.all([
+            fetch('/api/posts?status=published').then(x=>x.json()),
+            fetch('/api/posts?status=failed').then(x=>x.json()),
+          ]);
+          this.histPosts = [...(rp.posts||[]), ...(rf.posts||[])].sort((a,b)=>
+            (b.created_at||'').localeCompare(a.created_at||''));
+        }
       } catch(e) {}
     },
 

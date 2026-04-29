@@ -55,10 +55,11 @@ def _resolve_image_path(image_path: str) -> str:
     return image_path
 
 
-async def publish_post(post_id: int):
+async def publish_post(post_id: int) -> str:
+    """Returns empty string on success, or error description on failure."""
     post = db.get_post(post_id)
     if not post or post["status"] == "published":
-        return
+        return ""
 
     settings = db.get_settings()
     bot_token = os.getenv("TELEGRAM_BOT_TOKEN") or settings.get("telegram_bot_token", "")
@@ -69,7 +70,7 @@ async def publish_post(post_id: int):
     if not bot_token or not channels:
         logger.error("Telegram not configured")
         db.update_post(post_id, status="failed")
-        return
+        return "Telegram не настроен (нет токена или канала)"
 
     image_path = _resolve_image_path(post.get("image_path", ""))
 
@@ -93,6 +94,11 @@ async def publish_post(post_id: int):
 
     db.update_post(post_id, **updates)
     logger.info(f"Post {post_id} → {'published' if success else 'failed'} | results: {results}")
+
+    if not success:
+        errs = [r.get("error", "неизвестная ошибка") for r in results.values() if not r.get("success")]
+        return " | ".join(errs)
+    return ""
 
 
 async def auto_generate_and_publish() -> int:
@@ -140,14 +146,14 @@ async def auto_generate_and_publish() -> int:
         status="draft", scheduled_at=None,
     )
     logger.info(f"Auto-generated post {post_id}: {topic}")
-    await publish_post(post_id)
-    return post_id
+    tg_error = await publish_post(post_id)
+    return post_id, tg_error
 
 
 async def auto_post():
     posts = db.get_scheduled_posts()
     if posts:
-        await publish_post(posts[0]["id"])
+        await publish_post(posts[0]["id"])  # return value intentionally ignored for scheduler
         return
 
     settings = db.get_settings()
@@ -393,9 +399,9 @@ async def delete_post(post_id: int):
 async def publish_now(post_id: int):
     if not db.get_post(post_id):
         raise HTTPException(404, "Not found")
-    await publish_post(post_id)
+    tg_err = await publish_post(post_id)
     post = db.get_post(post_id)
-    return {"success": post["status"] == "published", "status": post["status"]}
+    return {"success": post["status"] == "published", "status": post["status"], "error": tg_err}
 
 
 class ScheduleIn(BaseModel):
@@ -446,14 +452,11 @@ async def trigger_autopilot():
         raise HTTPException(400, "Telegram не настроен (нет токена или канала)")
 
     try:
-        post_id = await auto_generate_and_publish()
+        post_id, tg_error = await auto_generate_and_publish()
     except Exception as e:
         logger.error(f"Autopilot trigger error: {e}")
         raise HTTPException(500, str(e))
 
-    post = db.get_post(post_id)
-    status = post["status"] if post else "unknown"
-    if status == "published":
+    if not tg_error:
         return {"success": True, "message": "Пост опубликован в Telegram ✓"}
-    else:
-        raise HTTPException(500, f"Пост создан (id={post_id}), но не отправлен в Telegram (статус: {status}). Проверьте токен бота и ID канала.")
+    raise HTTPException(500, f"Telegram: {tg_error}")

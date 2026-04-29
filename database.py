@@ -197,7 +197,14 @@ def get_post(post_id: int) -> dict | None:
 
 def get_posts(status: str = None) -> list[dict]:
     with _cur() as cur:
-        if status:
+        if status and "," in status:
+            statuses = [s.strip() for s in status.split(",")]
+            placeholders = ",".join("?" * len(statuses))
+            cur.execute(
+                _q(f"SELECT * FROM posts WHERE status IN ({placeholders}) ORDER BY created_at DESC"),
+                statuses,
+            )
+        elif status:
             cur.execute(
                 _q("SELECT * FROM posts WHERE status = ? ORDER BY created_at DESC"),
                 (status,),
