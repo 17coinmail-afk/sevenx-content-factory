@@ -91,6 +91,7 @@ def init_db():
             ("topic", "TEXT"),
             ("image_path", "TEXT"),
             ("style", "TEXT"),
+            ("format", "TEXT"),
             ("hashtags", "TEXT"),
             ("scheduled_at", "TEXT"),
             ("published_at", "TEXT"),
@@ -171,13 +172,13 @@ def update_setting(key: str, value: str):
 
 
 def create_post(
-    topic, text, image_path, style, hashtags, status, scheduled_at=None
+    topic, text, image_path, style, hashtags, status, scheduled_at=None, post_format="promo"
 ) -> int:
     sql = _q(
-        "INSERT INTO posts (topic, text, image_path, style, hashtags, status, scheduled_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)"
+        "INSERT INTO posts (topic, text, image_path, style, format, hashtags, status, scheduled_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
     )
-    args = (topic, text, image_path, style, hashtags, status, scheduled_at)
+    args = (topic, text, image_path, style, post_format, hashtags, status, scheduled_at)
 
     with _cur() as cur:
         if IS_PG:

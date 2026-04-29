@@ -72,17 +72,19 @@ PRESET_TOPICS = [
 ]
 
 AUTOPILOT_STYLES = ["expert", "casual", "case", "faq"]
+# 2 promos for every 1 article — promos are punchy for daily flow, articles build authority
+AUTOPILOT_FORMATS = ["promo", "promo", "article"]
 
 
-def _pick_autopilot_topic_and_style() -> tuple[str, str]:
-    """Pick a topic and style not used in the most recent published posts."""
+def _pick_autopilot_topic_and_style() -> tuple[str, str, str]:
+    """Pick topic, style, and format not matching recent posts."""
     recent = db.get_posts(status="published")
-    # Avoid repeating any of the last (N-1) topics so the full cycle before repeating
+
+    # Avoid repeating any of the last (N-1) topics
     avoid_count = min(len(PRESET_TOPICS) - 1, len(recent))
     used_topics = {p.get("topic", "") for p in recent[:avoid_count]}
     candidates = [t for t in PRESET_TOPICS if t not in used_topics]
     if not candidates:
-        # All topics used recently — only avoid the very last one
         last_topic = recent[0].get("topic", "") if recent else ""
         candidates = [t for t in PRESET_TOPICS if t != last_topic] or list(PRESET_TOPICS)
     topic = random.choice(candidates)
@@ -92,7 +94,12 @@ def _pick_autopilot_topic_and_style() -> tuple[str, str]:
     style_pool = [s for s in AUTOPILOT_STYLES if s != last_style] or AUTOPILOT_STYLES
     style = random.choice(style_pool)
 
-    return topic, style
+    # Rotate format — avoid same format twice in a row
+    last_format = recent[0].get("format", "") if recent else ""
+    format_pool = [f for f in AUTOPILOT_FORMATS if f != last_format] or AUTOPILOT_FORMATS
+    post_format = random.choice(format_pool)
+
+    return topic, style, post_format
 
 
 # ── Core publish logic ────────────────────────────────────────────────────────
@@ -168,14 +175,17 @@ async def auto_generate_and_publish() -> int:
     contact_info = settings.get("contact_info", "")
     pexels_key = settings.get("pexels_api_key", "").strip()
     image_provider = settings.get("image_provider", "pollinations")
-    topic, style = _pick_autopilot_topic_and_style()
+    topic, style, post_format = _pick_autopilot_topic_and_style()
 
     kwargs = {"api_key": api_key}
     if base_url:
         kwargs["base_url"] = base_url
     client = AsyncOpenAI(**kwargs)
 
-    variants = await generate_text_variants(topic, style, brand_voice, "", client, model, contact_info=contact_info)
+    variants = await generate_text_variants(
+        topic, style, brand_voice, "", client, model,
+        contact_info=contact_info, post_format=post_format,
+    )
     if not variants:
         raise ValueError("AI не вернул варианты текста")
 
@@ -195,10 +205,10 @@ async def auto_generate_and_publish() -> int:
 
     post_id = db.create_post(
         topic=topic, text=v["text"], image_path=image_path,
-        style=style, hashtags=v.get("hashtags", ""),
+        style=style, post_format=post_format, hashtags=v.get("hashtags", ""),
         status="draft", scheduled_at=None,
     )
-    logger.info(f"Auto-generated post {post_id}: [{style}] {topic}")
+    logger.info(f"Auto-generated post {post_id}: [{post_format}/{style}] {topic}")
     tg_error = await publish_post(post_id)
     return post_id, tg_error
 
@@ -319,6 +329,7 @@ async def currency():
 class GenerateIn(BaseModel):
     topic: str
     style: str = "expert"
+    post_format: str = "promo"
     include_rates: bool = False
     brand_voice: Optional[str] = None
 
@@ -363,7 +374,7 @@ async def generate(req: GenerateIn):
         variants = await generate_text_variants(
             topic=req.topic, style=req.style, brand_voice=brand_voice,
             currency_text=currency_text, client=client, model=model,
-            contact_info=contact_info,
+            contact_info=contact_info, post_format=req.post_format,
         )
         return {"variants": variants}
     except Exception as e:
