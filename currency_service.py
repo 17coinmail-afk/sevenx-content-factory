@@ -55,3 +55,10 @@ def format_rates_for_post(data: dict) -> str:
         flag = FLAGS.get(currency, "")
         lines.append(f"{flag} {currency}: {rate} ₽")
     return "\n".join(lines)
+
+
+def strip_rates_block(text: str) -> str:
+    """Remove a previously appended CBR rates block so it can be replaced with fresh data."""
+    marker = "\n\n💱 Курсы ЦБ РФ на"
+    idx = text.find(marker)
+    return text[:idx] if idx != -1 else text
