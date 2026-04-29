@@ -146,7 +146,7 @@ _TOPIC_VISUALS = {
 }
 
 
-def _build_image_prompt(topic: str) -> str:
+def _build_image_prompt(topic: str, hook: str = "") -> str:
     import random
     style = random.choice(_IMAGE_STYLES)
     topic_lower = topic.lower()
@@ -155,9 +155,11 @@ def _build_image_prompt(topic: str) -> str:
         if key in topic_lower:
             extra = f" Featured elements: {visual}."
             break
+    # Hook makes the prompt unique per post — prevents Pollinations cache hits
+    hook_part = f" Visual concept: {hook.strip()}." if hook and hook.strip() else ""
     return (
         f"{style}. A powerful business image for a Russian foreign-trade payment company. "
-        f"Theme: '{topic}'.{extra} "
+        f"Theme: '{topic}'.{extra}{hook_part} "
         f"Color palette: deep forest green #0f2018, gold #c9a84c, emerald #52b788. "
         f"International finance, global money transfers, premium corporate feel. "
         f"NO text, NO letters, NO words anywhere in the image."
@@ -181,7 +183,6 @@ async def generate_text_variants(
 ) -> list[dict]:
     format_prompt = FORMAT_PROMPTS.get(post_format, FORMAT_PROMPTS["promo"])
     style_prompt = STYLE_PROMPTS.get(style, STYLE_PROMPTS["expert"])
-    currency_block = f"\n\nВключи в пост актуальные курсы валют:\n{currency_text}" if currency_text else ""
     contact_block = f"\n\nКонтакт для CTA в посте: {contact_info}" if contact_info else ""
 
     system = brand_voice.strip() if brand_voice.strip() else SYSTEM_PROMPT
@@ -204,7 +205,7 @@ async def generate_text_variants(
 {format_prompt}
 
 Тон:
-{style_prompt}{currency_block}{contact_block}
+{style_prompt}{contact_block}
 
 {variant_instructions}
 
@@ -249,6 +250,13 @@ image_hook — максимум 5 слов, провокационный крю�
         variants = result
     if not variants:
         logger.warning(f"AI returned no variants. Keys: {list(result.keys()) if isinstance(result, dict) else type(result)}")
+
+    # Append currency rates at the very end of each variant's text
+    if currency_text and variants:
+        for v in variants:
+            if isinstance(v, dict) and v.get("text"):
+                v["text"] = v["text"].rstrip() + "\n\n" + currency_text
+
     return variants
 
 
@@ -478,11 +486,12 @@ async def fetch_image_pexels(topic: str, api_key: str, contact_info: str = "", h
             query = q
             break
 
-    logger.info(f"Pexels search: '{query}' for topic '{topic[:60]}'")
+    page = random.randint(1, 4)
+    logger.info(f"Pexels search: '{query}' page={page} for topic '{topic[:60]}'")
     headers = {"Authorization": api_key}
     search_url = (
         f"https://api.pexels.com/v1/search"
-        f"?query={urllib.parse.quote(query)}&per_page=10&orientation=square"
+        f"?query={urllib.parse.quote(query)}&per_page=30&page={page}&orientation=square"
     )
 
     async with httpx.AsyncClient(timeout=30) as http:
@@ -492,9 +501,19 @@ async def fetch_image_pexels(topic: str, api_key: str, contact_info: str = "", h
 
     photos = data.get("photos", [])
     if not photos:
+        # fallback to page 1 if random page returned nothing
+        search_url_p1 = (
+            f"https://api.pexels.com/v1/search"
+            f"?query={urllib.parse.quote(query)}&per_page=30&page=1&orientation=square"
+        )
+        async with httpx.AsyncClient(timeout=30) as http:
+            resp = await http.get(search_url_p1, headers=headers)
+            resp.raise_for_status()
+            photos = resp.json().get("photos", [])
+    if not photos:
         raise ValueError(f"Pexels: no photos for '{query}'")
 
-    photo = random.choice(photos[:min(6, len(photos))])
+    photo = random.choice(photos)
     img_url = photo["src"]["large"]
 
     filename = f"{uuid.uuid4()}.jpg"
@@ -512,7 +531,7 @@ async def fetch_image_pexels(topic: str, api_key: str, contact_info: str = "", h
 
 async def generate_image_pollinations(topic: str, post_text: str, contact_info: str = "", hook: str = "") -> str:
     import random
-    prompt  = _build_image_prompt(topic)
+    prompt  = _build_image_prompt(topic, hook=hook)
     encoded = urllib.parse.quote(prompt)
     seed    = random.randint(1, 999_999)
     logger.info(f"Image prompt (seed={seed}): {prompt[:120]}")
