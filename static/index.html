@@ -432,7 +432,28 @@
       <!-- Storage warning -->
       <div x-show="storageType==='sqlite_ephemeral'"
            class="bg-yellow-900/20 border border-yellow-600/40 rounded-2xl p-4 mb-4 text-xs text-yellow-300">
-        ⚠️ <b>Данные хранятся в SQLite</b> — при перезапуске сервера они сбросятся. Подключите PostgreSQL в Render Dashboard → вкладка Environment.
+        ⚠️ <b>SQLite:</b> данные сбрасываются при рестарте сервера. Добавьте переменные окружения ниже — они сохранятся навсегда.
+      </div>
+
+      <!-- Env vars status -->
+      <div class="bg-[#0f2018] border border-[#1a3328] rounded-2xl p-5 mb-4">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-sm font-semibold">🔒 Переменные окружения Render</h2>
+          <span class="text-[#3d6b52] text-xs">Хранятся постоянно, не зависят от БД</span>
+        </div>
+        <p class="text-[#3d6b52] text-xs mb-3">Добавьте в <b class="text-[#5a8a6a]">Render Dashboard → Environment</b> — ключи не пропадут при перезапуске.</p>
+        <div class="space-y-2">
+          <template x-for="ev in envVars" :key="ev.name">
+            <div class="flex items-center justify-between py-1.5 px-3 rounded-xl bg-[#071410]">
+              <div class="flex items-center gap-2">
+                <span :class="ev.set ? 'text-[#6bbf8e]' : 'text-[#3d6b52]'" x-text="ev.set ? '✓' : '○'"></span>
+                <code class="text-xs text-[#5a8a6a]" x-text="ev.name"></code>
+              </div>
+              <span :class="ev.set ? 'text-[#6bbf8e] bg-[#6bbf8e]/10' : 'text-[#3d6b52] bg-[#152b1f]'"
+                    class="text-xs px-2 py-0.5 rounded-lg" x-text="ev.set ? 'установлено' : 'не задано'"></span>
+            </div>
+          </template>
+        </div>
       </div>
 
       <!-- AI Provider -->
@@ -701,6 +722,18 @@ function app() {
       contact_info: '',
       saving: false, autopilotLoading: false,
     },
+
+    // Env vars status (populated from /api/settings masked fields)
+    envVars: [
+      { name: 'OPENAI_API_KEY',      set: false },
+      { name: 'PEXELS_API_KEY',      set: false },
+      { name: 'TELEGRAM_BOT_TOKEN',  set: false },
+      { name: 'CHANNEL_1_ID',        set: false },
+      { name: 'CHANNEL_2_ID',        set: false },
+      { name: 'AI_BASE_URL',         set: false },
+      { name: 'AI_MODEL',            set: false },
+      { name: 'CONTACT_INFO',        set: false },
+    ],
     autoTimes: ['10:00', '19:00'],
 
     // Toast
@@ -760,6 +793,20 @@ function app() {
         this.sf.brand_voice = this.settings.brand_voice || '';
         this.sf.contact_info = this.settings.contact_info || '';
         try { this.autoTimes = JSON.parse(this.settings.auto_post_times || '["10:00","19:00"]'); } catch(e) {}
+
+        // Update env vars status: "(env)" suffix means value came from environment variable
+        const s = this.settings;
+        const envMap = {
+          'OPENAI_API_KEY':     s.openai_api_key_masked?.includes('(env)'),
+          'PEXELS_API_KEY':     s.pexels_api_key_masked?.includes('(env)'),
+          'TELEGRAM_BOT_TOKEN': s.telegram_bot_token_masked?.includes('(env)'),
+          'CHANNEL_1_ID':       !!(s.channel_1_id),
+          'CHANNEL_2_ID':       !!(s.channel_2_id),
+          'AI_BASE_URL':        !!(s.ai_base_url),
+          'AI_MODEL':           !!(s.ai_model),
+          'CONTACT_INFO':       !!(s.contact_info),
+        };
+        this.envVars = this.envVars.map(ev => ({ ...ev, set: !!envMap[ev.name] }));
       } catch(e) {}
     },
 
