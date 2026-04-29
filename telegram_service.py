@@ -1,3 +1,4 @@
+import re
 import httpx
 import logging
 from pathlib import Path
@@ -5,6 +6,21 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 CAPTION_LIMIT = 1024
+
+_ALLOWED_TAGS = re.compile(
+    r'<(?!/?(b|strong|i|em|u|s|strike|del|code|pre|a)(\s[^>]*)?>)',
+    re.IGNORECASE,
+)
+
+def _clean_html(text: str) -> str:
+    text = re.sub(r'<br\s*/?>', '\n', text, flags=re.IGNORECASE)
+    text = re.sub(r'<p[^>]*>', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'</p>', '\n\n', text, flags=re.IGNORECASE)
+    text = re.sub(r'<li[^>]*>', '• ', text, flags=re.IGNORECASE)
+    text = re.sub(r'</li>', '\n', text, flags=re.IGNORECASE)
+    text = re.sub(r'</?(?:ul|ol|h[1-6]|div|span|header|footer|section)[^>]*>', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    return text.strip()
 
 
 async def send_post(
@@ -14,6 +30,7 @@ async def send_post(
     image_path: str = None,
     hashtags: str = "",
 ) -> dict:
+    text = _clean_html(text)
     full_text = f"{text}\n\n{hashtags}" if hashtags else text
     caption = full_text[:CAPTION_LIMIT] if len(full_text) > CAPTION_LIMIT else full_text
     results = {}
