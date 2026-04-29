@@ -265,8 +265,11 @@ async def auto_generate_and_publish() -> int:
         kwargs["base_url"] = base_url
     client = AsyncOpenAI(**kwargs)
 
+    rates = await get_cbr_rates()
+    currency_text = format_rates_for_post(rates)
+
     variants = await generate_text_variants(
-        topic, style, brand_voice, "", client, model,
+        topic, style, brand_voice, currency_text, client, model,
         contact_info=contact_info, post_format=post_format,
     )
     if not variants:
@@ -370,8 +373,10 @@ async def _generate_week_bg(settings: dict):
         post_format = random.choice(AUTOPILOT_FORMATS)
 
         try:
+            rates = await get_cbr_rates()
+            currency_text = format_rates_for_post(rates)
             variants = await generate_text_variants(
-                topic, style, brand_voice, "", client, model,
+                topic, style, brand_voice, currency_text, client, model,
                 contact_info=contact_info, post_format=post_format,
             )
             if not variants:

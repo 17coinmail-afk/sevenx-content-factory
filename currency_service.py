@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 TRACKED = {"USD", "EUR", "CNY", "AED"}
 CBR_URL = "https://www.cbr.ru/scripts/XML_daily.asp"
 FLAGS = {"USD": "🇺🇸", "EUR": "🇪🇺", "CNY": "🇨🇳", "AED": "🇦🇪"}
-_CACHE_TTL = 1800  # 30 minutes
+_CACHE_TTL = 300  # 5 minutes
 
 _cache: dict = {"data": None, "expires": 0.0}
 
