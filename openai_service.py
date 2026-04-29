@@ -198,13 +198,19 @@ image_hook — максимум 5 слов, провокационный крю�
     try:
         result = json.loads(raw)
     except json.JSONDecodeError:
-        import re
-        m = re.search(r'\{.*\}', raw, re.DOTALL)
-        result = json.loads(m.group()) if m else {}
+        try:
+            import re as _re
+            m = _re.search(r'\{.*\}', raw, _re.DOTALL)
+            result = json.loads(m.group()) if m else {}
+        except Exception:
+            logger.error(f"Failed to parse AI response as JSON: {raw[:200]}")
+            return []
 
     variants = result.get("variants") or result.get("Variants") or result.get("posts") or []
     if not variants and isinstance(result, list):
         variants = result
+    if not variants:
+        logger.warning(f"AI returned no variants. Keys: {list(result.keys()) if isinstance(result, dict) else type(result)}")
     return variants
 
 
@@ -350,9 +356,9 @@ def _add_branding(filepath: Path, headline: str, contact_info: str = "", hook: s
         img = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
         draw = ImageDraw.Draw(img)
 
-        # Emerald separator line at top of panel
+        # Brand separator line at top of panel
         sep = max(4, int(H * 0.004))
-        draw.rectangle([(0, panel_top), (W, panel_top + sep)], fill=(82, 183, 136))
+        draw.rectangle([(0, panel_top), (W, panel_top + sep)], fill=(107, 191, 142))
 
         # ── Text layout — strictly left-aligned from px ───────────────────
         y = panel_top + sep + pad
@@ -374,8 +380,50 @@ def _add_branding(filepath: Path, headline: str, contact_info: str = "", hook: s
         draw.text((px, y), contact_line, fill=(160, 160, 160), font=font_s)
         y += sub_h
 
-        # SEVEN-X: emerald, medium
-        draw.text((px, y), "SEVEN-X", fill=(82, 183, 136), font=font_b)
+        # sevenx wordmark logo — paste PNG if available, fallback to text
+        _WORDMARK = Path(__file__).parent / "static" / "brand" / "wordmark-dark.png"
+        _painted_logo = False
+        if _WORDMARK.exists():
+            try:
+                wm = Image.open(_WORDMARK).convert("RGBA")
+                # Invert dark logo to white so it shows on dark panel
+                from PIL import ImageOps
+                r, g, b, a = wm.split()
+                rgb_inv = ImageOps.invert(Image.merge("RGB", (r, g, b)))
+                wm = Image.merge("RGBA", (*rgb_inv.split(), a))
+                target_h = max(brand_sz, int(H * 0.04))
+                wm_w = int(wm.width * target_h / wm.height)
+                wm = wm.resize((wm_w, target_h), Image.LANCZOS)
+                base = img.convert("RGBA")
+                base.paste(wm, (px, y), wm)
+                img = base.convert("RGB")
+                draw = ImageDraw.Draw(img)
+                _painted_logo = True
+            except Exception as _le:
+                logger.debug(f"Logo paste failed: {_le}")
+        if not _painted_logo:
+            draw.text((px, y), "sevenx", fill=(107, 191, 142), font=font_b)
+
+        # Small brand mark in top-right corner (светлый зеленый знак)
+        _MARK = Path(__file__).parent / "static" / "brand" / "mark-green.png"
+        if _MARK.exists():
+            try:
+                from PIL import ImageOps
+                mk = Image.open(_MARK).convert("RGBA")
+                mark_h = max(int(H * 0.07), 48)
+                mk_w = int(mk.width * mark_h / mk.height)
+                mk = mk.resize((mk_w, mark_h), Image.LANCZOS)
+                # Slight transparency so it doesn't overpower the photo
+                r, g, b, a = mk.split()
+                a = a.point(lambda x: int(x * 0.80))
+                mk = Image.merge("RGBA", (r, g, b, a))
+                base2 = img.convert("RGBA")
+                mark_x = W - mk_w - int(W * 0.04)
+                mark_y = int(H * 0.03)
+                base2.paste(mk, (mark_x, mark_y), mk)
+                img = base2.convert("RGB")
+            except Exception as _me:
+                logger.debug(f"Mark paste failed: {_me}")
 
         img.save(filepath, "JPEG", quality=93)
         logger.info(f"Branding OK: '{title[:40]}' {len(lines)} lines, panel_h={panel_h}")

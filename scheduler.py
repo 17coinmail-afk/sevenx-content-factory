@@ -28,11 +28,20 @@ async def _check_scheduled():
     import database as db
     from datetime import datetime
 
-    now = datetime.now().strftime("%Y-%m-%dT%H:%M")
+    now = datetime.now()
     for post in db.get_scheduled_posts():
-        if post.get("scheduled_at") and post["scheduled_at"][:16] <= now:
-            if _publish_callback:
+        sa = post.get("scheduled_at")
+        if not sa:
+            continue
+        try:
+            due = datetime.fromisoformat(sa)
+        except ValueError:
+            due = datetime.strptime(sa[:16], "%Y-%m-%dT%H:%M")
+        if due <= now and _publish_callback:
+            try:
                 await _publish_callback(post["id"])
+            except Exception as e:
+                logger.error(f"Scheduler failed to publish post {post['id']}: {e}")
 
 
 def start(publish_callback):

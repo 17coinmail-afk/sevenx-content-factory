@@ -2,10 +2,12 @@ import re
 import httpx
 import logging
 from pathlib import Path
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 CAPTION_LIMIT = 1024
+MESSAGE_LIMIT = 4096
 
 _ALLOWED_TAGS = re.compile(
     r'<(?!/?(b|strong|i|em|u|s|strike|del|code|pre|a)(\s[^>]*)?>)',
@@ -27,12 +29,13 @@ async def send_post(
     bot_token: str,
     channel_ids: list[str],
     text: str,
-    image_path: str = None,
+    image_path: Optional[str] = None,
     hashtags: str = "",
 ) -> dict:
     text = _clean_html(text)
     full_text = f"{text}\n\n{hashtags}" if hashtags else text
-    caption = full_text[:CAPTION_LIMIT] if len(full_text) > CAPTION_LIMIT else full_text
+    caption = full_text[:CAPTION_LIMIT]
+    msg_text = full_text[:MESSAGE_LIMIT]
     results = {}
     base = f"https://api.telegram.org/bot{bot_token}"
 
@@ -56,7 +59,7 @@ async def send_post(
                     if data.get("ok"):
                         results[channel_id] = {
                             "success": True,
-                            "message_id": data["result"]["message_id"],
+                            "message_id": data["result"].get("message_id"),
                         }
                         sent_photo = True
                     else:
@@ -68,13 +71,13 @@ async def send_post(
                 if not sent_photo:
                     resp = await client.post(
                         f"{base}/sendMessage",
-                        json={"chat_id": channel_id, "text": full_text, "parse_mode": "HTML"},
+                        json={"chat_id": channel_id, "text": msg_text, "parse_mode": "HTML"},
                     )
                     data = resp.json()
                     if data.get("ok"):
                         results[channel_id] = {
                             "success": True,
-                            "message_id": data["result"]["message_id"],
+                            "message_id": data["result"].get("message_id"),
                         }
                     else:
                         results[channel_id] = {"success": False, "error": data.get("description")}

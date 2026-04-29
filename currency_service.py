@@ -2,15 +2,21 @@ import httpx
 import xml.etree.ElementTree as ET
 from datetime import datetime
 import logging
+import time
 
 logger = logging.getLogger(__name__)
 
 TRACKED = {"USD", "EUR", "CNY", "AED"}
 CBR_URL = "https://www.cbr.ru/scripts/XML_daily.asp"
 FLAGS = {"USD": "🇺🇸", "EUR": "🇪🇺", "CNY": "🇨🇳", "AED": "🇦🇪"}
+_CACHE_TTL = 1800  # 30 minutes
+
+_cache: dict = {"data": None, "expires": 0.0}
 
 
 async def get_cbr_rates() -> dict:
+    if _cache["data"] and time.monotonic() < _cache["expires"]:
+        return _cache["data"]
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.get(CBR_URL)
@@ -26,13 +32,18 @@ async def get_cbr_rates() -> dict:
                 value = float(valute.find("Value").text.replace(",", ".")) / nominal
                 rates[code] = round(value, 2)
 
-        return {
+        result = {
             "rates": rates,
             "date": datetime.now().strftime("%d.%m.%Y"),
             "source": "ЦБ РФ",
         }
+        _cache["data"] = result
+        _cache["expires"] = time.monotonic() + _CACHE_TTL
+        return result
     except Exception as e:
         logger.error(f"Currency fetch error: {e}")
+        if _cache["data"]:
+            return _cache["data"]
         return {"rates": {}, "date": "", "source": "error"}
 
 

@@ -40,7 +40,36 @@ PRESET_TOPICS = [
     "Агентская схема или договор поставки: что выбрать",
     "40+ компаний-плательщиков по всему миру",
     "Как Seven-X решает проблему платежей в санкционных условиях",
+    "Кейс клиента: как провели платёж за три часа",
+    "Топ ошибок при ВЭД-платежах через третьи страны",
+    "Почему банки блокируют платежи в Китай — и как это обойти",
+    "Как вернуть экспортную выручку в Россию",
+    "Личный менеджер vs банк: в чём разница для ВЭД",
+    "Работа с наличными в ВЭД: легально и без рисков",
 ]
+
+AUTOPILOT_STYLES = ["expert", "casual", "case", "faq"]
+
+
+def _pick_autopilot_topic_and_style() -> tuple[str, str]:
+    """Pick a topic and style not used in the most recent published posts."""
+    recent = db.get_posts(status="published")
+    # Avoid repeating any of the last (N-1) topics so the full cycle before repeating
+    avoid_count = min(len(PRESET_TOPICS) - 1, len(recent))
+    used_topics = {p.get("topic", "") for p in recent[:avoid_count]}
+    candidates = [t for t in PRESET_TOPICS if t not in used_topics]
+    if not candidates:
+        # All topics used recently — only avoid the very last one
+        last_topic = recent[0].get("topic", "") if recent else ""
+        candidates = [t for t in PRESET_TOPICS if t != last_topic] or list(PRESET_TOPICS)
+    topic = random.choice(candidates)
+
+    # Rotate style — avoid the last used one
+    last_style = recent[0].get("style", "") if recent else ""
+    style_pool = [s for s in AUTOPILOT_STYLES if s != last_style] or AUTOPILOT_STYLES
+    style = random.choice(style_pool)
+
+    return topic, style
 
 
 # ── Core publish logic ────────────────────────────────────────────────────────
@@ -116,18 +145,18 @@ async def auto_generate_and_publish() -> int:
     contact_info = settings.get("contact_info", "")
     pexels_key = settings.get("pexels_api_key", "").strip()
     image_provider = settings.get("image_provider", "pollinations")
-    topic = random.choice(PRESET_TOPICS)
+    topic, style = _pick_autopilot_topic_and_style()
 
     kwargs = {"api_key": api_key}
     if base_url:
         kwargs["base_url"] = base_url
     client = AsyncOpenAI(**kwargs)
 
-    variants = await generate_text_variants(topic, "expert", brand_voice, "", client, model, contact_info=contact_info)
+    variants = await generate_text_variants(topic, style, brand_voice, "", client, model, contact_info=contact_info)
     if not variants:
         raise ValueError("AI не вернул варианты текста")
 
-    v = variants[0]
+    v = random.choice(variants)
     hook = v.get("image_hook", "")
 
     image_path = ""
@@ -143,10 +172,10 @@ async def auto_generate_and_publish() -> int:
 
     post_id = db.create_post(
         topic=topic, text=v["text"], image_path=image_path,
-        style="expert", hashtags=v.get("hashtags", ""),
+        style=style, hashtags=v.get("hashtags", ""),
         status="draft", scheduled_at=None,
     )
-    logger.info(f"Auto-generated post {post_id}: {topic}")
+    logger.info(f"Auto-generated post {post_id}: [{style}] {topic}")
     tg_error = await publish_post(post_id)
     return post_id, tg_error
 
@@ -183,6 +212,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Seven-X Content Factory", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 app.mount("/images", StaticFiles(directory=str(IMAGES_DIR)), name="images")
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
 @app.get("/health")
