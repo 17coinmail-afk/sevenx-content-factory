@@ -1,9 +1,12 @@
 import os
 import logging
+from zoneinfo import ZoneInfo
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 logger = logging.getLogger(__name__)
+
+MOSCOW_TZ = ZoneInfo("Europe/Moscow")
 
 scheduler = AsyncIOScheduler()
 _publish_callback = None
@@ -28,7 +31,7 @@ async def _check_scheduled():
     import database as db
     from datetime import datetime
 
-    now = datetime.now()
+    now = datetime.now(MOSCOW_TZ).replace(tzinfo=None)
     for post in db.get_scheduled_posts():
         sa = post.get("scheduled_at")
         if not sa:
@@ -86,7 +89,7 @@ def apply_auto_post(times: list[str], enabled: bool, auto_post_callback):
             hour, minute = map(int, t.split(":"))
             scheduler.add_job(
                 auto_post_callback,
-                CronTrigger(hour=hour, minute=minute),
+                CronTrigger(hour=hour, minute=minute, timezone=MOSCOW_TZ),
                 id=f"auto_post_{i}",
                 replace_existing=True,
             )
