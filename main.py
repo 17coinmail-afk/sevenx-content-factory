@@ -43,7 +43,7 @@ _ENV_MAP = {
 
 def _effective_settings() -> dict:
     """Return DB settings with env vars overriding where set (env = source of truth)."""
-    s = _effective_settings()
+    s = db.get_settings()
     for key, env_name in _ENV_MAP.items():
         val = os.getenv(env_name, "").strip()
         if val:
