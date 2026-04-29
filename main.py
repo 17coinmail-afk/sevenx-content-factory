@@ -325,7 +325,7 @@ async def auto_post():
 # ── Week generation (background) ─────────────────────────────────────────────
 
 async def _generate_week_bg(settings: dict):
-    """Generate 7 scheduled posts over the next 7 days. Runs in background."""
+    """Generate posts for the next 7 days: one post per scheduled time per day."""
     from openai import AsyncOpenAI
     from openai_service import generate_text_variants, DEFAULT_MODELS
     from zoneinfo import ZoneInfo
@@ -343,6 +343,8 @@ async def _generate_week_bg(settings: dict):
     pexels_key = settings.get("pexels_api_key", "").strip()
     image_provider = settings.get("image_provider", "pollinations")
     times_raw = json.loads(settings.get("auto_post_times", '["10:00","19:00"]'))
+    if not times_raw:
+        times_raw = ["10:00"]
 
     kwargs = {"api_key": api_key}
     if base_url:
@@ -354,68 +356,75 @@ async def _generate_week_bg(settings: dict):
 
     used_topics: set = set()
     created = 0
+    total = 7 * len(times_raw)
+
+    # Strictly alternate article/promo across all slots
+    slot_index = 0
 
     for day_offset in range(1, 8):
         target_day = (now + timedelta(days=day_offset)).date()
-        time_str = times_raw[(day_offset - 1) % len(times_raw)] if times_raw else "10:00"
-        hour, minute = map(int, time_str.split(":"))
-        scheduled_at = datetime(
-            target_day.year, target_day.month, target_day.day, hour, minute
-        ).isoformat()
 
-        # Pick unique topic within this batch
-        recent = db.get_posts(status="published")
-        avoid = used_topics | {p.get("topic", "") for p in recent[:len(PRESET_TOPICS) - 1]}
-        candidates = [t for t in PRESET_TOPICS if t not in avoid]
-        if not candidates:
-            candidates = [t for t in PRESET_TOPICS if t not in used_topics] or list(PRESET_TOPICS)
-        topic = random.choice(candidates)
-        used_topics.add(topic)
+        for time_str in times_raw:
+            hour, minute = map(int, time_str.split(":"))
+            scheduled_at = datetime(
+                target_day.year, target_day.month, target_day.day, hour, minute
+            ).isoformat()
 
-        last_style = recent[0].get("style", "") if recent else ""
-        style = random.choice([s for s in AUTOPILOT_STYLES if s != last_style] or AUTOPILOT_STYLES)
-        post_format = random.choice(AUTOPILOT_FORMATS)
+            # Pick unique topic within this batch
+            recent = db.get_posts(status="published")
+            avoid = used_topics | {p.get("topic", "") for p in recent[:len(PRESET_TOPICS) - 1]}
+            candidates = [t for t in PRESET_TOPICS if t not in avoid]
+            if not candidates:
+                candidates = [t for t in PRESET_TOPICS if t not in used_topics] or list(PRESET_TOPICS)
+            topic = random.choice(candidates)
+            used_topics.add(topic)
 
-        try:
-            variants = await generate_text_variants(
-                topic, style, brand_voice, "", client, model,
-                contact_info=contact_info, post_format=post_format,
-            )
-            if not variants:
-                logger.warning(f"Week gen day {day_offset}: no variants returned")
-                continue
+            last_style = recent[0].get("style", "") if recent else ""
+            style = random.choice([s for s in AUTOPILOT_STYLES if s != last_style] or AUTOPILOT_STYLES)
+            # Strict alternation across all slots in the week
+            post_format = AUTOPILOT_FORMATS[slot_index % len(AUTOPILOT_FORMATS)]
+            slot_index += 1
 
-            v = random.choice(variants)
-            hook = v.get("image_hook", "")
-
-            image_path = ""
             try:
-                if image_provider == "pexels" and pexels_key:
-                    from openai_service import fetch_image_pexels
-                    image_path = await fetch_image_pexels(topic, pexels_key, contact_info=contact_info, hook=hook)
-                elif image_provider == "openai":
-                    from openai_service import generate_image as gen_img, _add_branding
-                    img_path_str = await gen_img(topic, v["text"], client)
-                    local = IMAGES_DIR / img_path_str[8:]
-                    _add_branding(local, topic, contact_info=contact_info, hook=hook)
-                    image_path = img_path_str
-                else:
-                    from openai_service import generate_image_pollinations
-                    image_path = await generate_image_pollinations(topic, v["text"], contact_info=contact_info, hook=hook)
-            except Exception as img_e:
-                logger.warning(f"Week gen image failed day {day_offset}: {img_e}")
+                variants = await generate_text_variants(
+                    topic, style, brand_voice, "", client, model,
+                    contact_info=contact_info, post_format=post_format,
+                )
+                if not variants:
+                    logger.warning(f"Week gen {scheduled_at}: no variants returned")
+                    continue
 
-            db.create_post(
-                topic=topic, text=v["text"], image_path=image_path,
-                style=style, post_format=post_format, hashtags=v.get("hashtags", ""),
-                status="scheduled", scheduled_at=scheduled_at,
-            )
-            created += 1
-            logger.info(f"Week gen: day +{day_offset} → {topic[:50]} @ {scheduled_at}")
-        except Exception as e:
-            logger.error(f"Week gen failed day {day_offset}: {e}")
+                v = random.choice(variants)
+                hook = v.get("image_hook", "")
 
-    logger.info(f"Week gen complete: {created}/7 posts scheduled")
+                image_path = ""
+                try:
+                    if image_provider == "pexels" and pexels_key:
+                        from openai_service import fetch_image_pexels
+                        image_path = await fetch_image_pexels(topic, pexels_key, contact_info=contact_info, hook=hook)
+                    elif image_provider == "openai":
+                        from openai_service import generate_image as gen_img, _add_branding
+                        img_path_str = await gen_img(topic, v["text"], client)
+                        local = IMAGES_DIR / img_path_str[8:]
+                        _add_branding(local, topic, contact_info=contact_info, hook=hook)
+                        image_path = img_path_str
+                    else:
+                        from openai_service import generate_image_pollinations
+                        image_path = await generate_image_pollinations(topic, v["text"], contact_info=contact_info, hook=hook)
+                except Exception as img_e:
+                    logger.warning(f"Week gen image failed {scheduled_at}: {img_e}")
+
+                db.create_post(
+                    topic=topic, text=v["text"], image_path=image_path,
+                    style=style, post_format=post_format, hashtags=v.get("hashtags", ""),
+                    status="scheduled", scheduled_at=scheduled_at,
+                )
+                created += 1
+                logger.info(f"Week gen: {scheduled_at} [{post_format}/{style}] {topic[:50]}")
+            except Exception as e:
+                logger.error(f"Week gen failed {scheduled_at}: {e}")
+
+    logger.info(f"Week gen complete: {created}/{total} posts scheduled")
 
 
 # ── Lifespan ──────────────────────────────────────────────────────────────────
@@ -735,5 +744,7 @@ async def generate_week_endpoint(background_tasks: BackgroundTasks):
     settings = _effective_settings()
     if not settings.get("openai_api_key", ""):
         raise HTTPException(400, "AI API ключ не настроен — добавьте его в Настройках")
+    times_raw = json.loads(settings.get("auto_post_times", '["10:00","19:00"]'))
+    total = 7 * max(len(times_raw), 1)
     background_tasks.add_task(_generate_week_bg, settings)
-    return {"message": "Запущено! 7 постов создаются в фоне — проверьте Календарь через 1–2 минуты."}
+    return {"message": f"Запущено! {total} постов создаются в фоне — проверьте Историю через 2–3 минуты."}
