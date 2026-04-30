@@ -383,8 +383,10 @@ async def auto_generate_and_publish() -> tuple:
 
 
 async def auto_post():
-    """Runs at configured times. Publishing scheduled posts is handled by check_scheduled (every minute).
-    This function only auto-generates new content when the queue is empty and auto_generate_enabled is on."""
+    """Runs at configured times. First publishes any due scheduled posts (backup for the
+    every-minute interval job that may have been missed while Render was sleeping),
+    then auto-generates new content if auto_generate_enabled=true and queue is empty."""
+    await sched.check_scheduled()  # always publish due posts at configured times
     settings = _effective_settings()
     if settings.get("auto_generate_enabled", "false") != "true":
         return
@@ -450,14 +452,19 @@ async def _do_generate_week(settings: dict):
     # Strictly alternate formats across all slots
     slot_index = 0
 
-    for day_offset in range(1, 8):
+    for day_offset in range(0, 7):  # include today — skip past slots below
         target_day = (now + timedelta(days=day_offset)).date()
 
         for time_str in times_raw:
             hour, minute = map(int, time_str.split(":"))
-            scheduled_at = datetime(
-                target_day.year, target_day.month, target_day.day, hour, minute
-            ).isoformat()
+            slot_dt = datetime(target_day.year, target_day.month, target_day.day, hour, minute)
+
+            # Skip time slots that have already passed today
+            if day_offset == 0 and slot_dt <= now.replace(tzinfo=None):
+                slot_index += 1
+                continue
+
+            scheduled_at = slot_dt.isoformat()
 
             if scheduled_at[:16] in existing_slots:
                 logger.info(f"Week gen: {scheduled_at[:16]} already has a post — skipping")
@@ -530,8 +537,7 @@ async def lifespan(app: FastAPI):
 
     settings = _effective_settings()
     times = _safe_times(settings.get("auto_post_times", '["10:00","19:00"]'))
-    enabled = settings.get("auto_post_enabled", "false") == "true"
-    sched.apply_auto_post(times, enabled, auto_post)
+    sched.apply_auto_post(times, True, auto_post)  # always register — cron jobs publish due posts too
 
     yield
     sched.stop()
@@ -617,11 +623,10 @@ async def save_settings(data: SettingsIn):
     for k, v in updates.items():
         db.update_setting(k, v)
 
-    if "auto_post_enabled" in updates or "auto_post_times" in updates:
+    if "auto_post_times" in updates or "auto_generate_enabled" in updates:
         s = _effective_settings()
         times = _safe_times(s.get("auto_post_times", '["10:00","19:00"]'))
-        enabled = s.get("auto_post_enabled", "false") == "true"
-        sched.apply_auto_post(times, enabled, auto_post)
+        sched.apply_auto_post(times, True, auto_post)  # always enabled
 
     return {"success": True}
 

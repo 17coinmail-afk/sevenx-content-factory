@@ -486,25 +486,11 @@
       <div class="bg-[#0f2018] border border-[#1a3328] rounded-2xl p-5 mb-4">
         <h2 class="text-sm font-bold mb-4">🤖 Автопилот и расписание</h2>
 
-        <!-- Schedule toggle -->
+        <!-- Autopilot toggle -->
         <div class="flex items-center justify-between mb-3">
           <div>
-            <div class="text-sm font-medium">Публикация по расписанию</div>
-            <div class="text-xs text-[#3d6b52] mt-0.5">Запланированные посты публикуются автоматически</div>
-          </div>
-          <div @click="sf.auto_post_enabled=sf.auto_post_enabled==='true'?'false':'true'"
-               :class="sf.auto_post_enabled==='true'?'bg-[#2d6a4f]':'bg-[#1a3328]'"
-               class="w-11 h-6 rounded-full p-0.5 flex items-center transition-colors cursor-pointer flex-shrink-0 ml-4">
-            <div :class="sf.auto_post_enabled==='true'?'translate-x-5':'translate-x-0'"
-                 class="w-5 h-5 bg-white rounded-full transition-transform shadow-sm"></div>
-          </div>
-        </div>
-
-        <!-- Auto-generate toggle -->
-        <div class="flex items-center justify-between mb-4">
-          <div>
-            <div class="text-sm font-medium">Авто-генерация</div>
-            <div class="text-xs text-[#3d6b52] mt-0.5">Если очередь пуста — AI создаст новый пост сам</div>
+            <div class="text-sm font-medium">🤖 Автопилот</div>
+            <div class="text-xs text-[#3d6b52] mt-0.5">В указанное время AI создаёт и публикует новый пост если очередь пуста</div>
           </div>
           <div @click="sf.auto_generate_enabled=sf.auto_generate_enabled==='true'?'false':'true'"
                :class="sf.auto_generate_enabled==='true'?'bg-[#2d6a4f]':'bg-[#1a3328]'"
@@ -512,6 +498,11 @@
             <div :class="sf.auto_generate_enabled==='true'?'translate-x-5':'translate-x-0'"
                  class="w-5 h-5 bg-white rounded-full transition-transform shadow-sm"></div>
           </div>
+        </div>
+
+        <!-- Info note -->
+        <div class="text-xs text-[#5a8a6a] bg-[#071410] border border-[#1a3328] rounded-xl px-3 py-2.5 mb-4">
+          ℹ️ Запланированные посты из Календаря публикуются автоматически в указанное время — независимо от автопилота
         </div>
 
         <!-- Time slots -->
@@ -790,7 +781,7 @@ function app() {
       channel_1_id: '', channel_2_id: '',
       ai_base_url: '', ai_model: '', image_provider: 'pollinations',
       pexels_api_key: '',
-      auto_post_enabled: 'false', auto_generate_enabled: 'false',
+      auto_generate_enabled: 'false',
       brand_voice: '', contact_info: '',
       add_rates_to_posts: 'true',
       saving: false, weekLoading: false,
@@ -837,7 +828,6 @@ function app() {
         this.sf.ai_model          = s.ai_model || '';
         this.sf.image_provider    = s.image_provider || 'pollinations';
         this.sf.pexels_api_key    = s.pexels_api_key || '';
-        this.sf.auto_post_enabled = s.auto_post_enabled || 'false';
         this.sf.auto_generate_enabled = s.auto_generate_enabled || 'false';
         this.sf.brand_voice       = s.brand_voice || '';
         this.sf.contact_info      = s.contact_info || '';
@@ -866,7 +856,7 @@ function app() {
           ai_base_url:            this.sf.ai_base_url,
           ai_model:               this.sf.ai_model,
           image_provider:         this.sf.image_provider,
-          auto_post_enabled:      this.sf.auto_post_enabled,
+          auto_post_enabled:      'true',
           auto_post_times:        JSON.stringify(this.autoTimes),
           auto_generate_enabled:  this.sf.auto_generate_enabled,
           brand_voice:            this.sf.brand_voice,
