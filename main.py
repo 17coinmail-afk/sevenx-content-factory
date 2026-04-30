@@ -441,26 +441,28 @@ async def check_auto_post():
                 logger.info(f"check_auto_post: слот {key} уже обработан в этой сессии")
                 continue
 
-            # Простая проверка: есть ли published пост за последние 2 часа?
-            # published_at хранится как UTC. PostgreSQL возвращает datetime-объект,
-            # SQLite — строку. Нормализуем через _pa_str().
-            from datetime import timezone
+            # Проверяем: был ли уже пост именно для ЭТОГО слота?
+            # published_at хранится в UTC. Иркутск = UTC+8, значит slot (Иркутск) = slot - 8ч в UTC.
+            # Окно поиска: [slot_utc - 30мин .. slot_utc + 2ч] — чтобы не блокировать соседние слоты.
+            # PostgreSQL возвращает datetime-объект, SQLite — строку. Нормализуем через _pa_str().
 
             def _pa_str(p):
                 val = p.get("published_at", "")
-                if hasattr(val, "isoformat"):  # datetime object (PostgreSQL)
+                if hasattr(val, "isoformat"):
                     return val.isoformat()
                 return str(val) if val else ""
 
-            now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
-            cutoff_utc = (now_utc - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M")
+            slot_utc = slot - timedelta(hours=8)  # наивный UTC-эквивалент слота
+            win_start = (slot_utc - timedelta(minutes=30)).strftime("%Y-%m-%dT%H:%M")
+            win_end   = (slot_utc + timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M")
+
             recent = db.get_posts("published")
-            already = any(_pa_str(p)[:16] >= cutoff_utc for p in recent[:20])
-            logger.info(f"check_auto_post: already_published_in_2h={already}, cutoff_utc={cutoff_utc}")
+            already = any(win_start <= _pa_str(p)[:16] <= win_end for p in recent[:20])
+            logger.info(f"check_auto_post: slot_window_utc=[{win_start}..{win_end}], already={already}")
 
             if already:
                 _auto_post_triggered.add(key)
-                logger.info("check_auto_post: пост уже есть за последние 2 часа, пропускаю")
+                logger.info("check_auto_post: пост для этого слота уже есть, пропускаю")
                 continue
 
             logger.info(f"check_auto_post: ЗАПУСКАЮ авто-генерацию для слота {key}")
@@ -469,9 +471,9 @@ async def check_auto_post():
                 # 1. Публикуем запланированные посты (если есть просроченные)
                 await sched.check_scheduled()
 
-                # 2. Есть ли уже пост за последние 2 часа (после check_scheduled)?
+                # 2. Есть ли пост в окне этого слота (после check_scheduled)?
                 recent2 = db.get_posts("published")
-                already2 = any(_pa_str(p)[:16] >= cutoff_utc for p in recent2[:20])
+                already2 = any(win_start <= _pa_str(p)[:16] <= win_end for p in recent2[:20])
                 if already2:
                     logger.info("check_auto_post: запланированный пост опубликован check_scheduled")
                 else:
@@ -994,6 +996,7 @@ async def autopilot_debug():
         return str(val) if val else ""
 
     slot_analysis = []
+    recent_all = db.get_posts("published")
     for time_str in times:
         try:
             hour, minute = map(int, time_str.split(":"))
@@ -1001,17 +1004,21 @@ async def autopilot_debug():
             slot_iso = slot.strftime("%Y-%m-%dT%H:%M")
             key = slot.strftime("%Y-%m-%d_%H:%M")
             in_window = slot <= now <= slot + timedelta(hours=2)
-            recent = db.get_posts("published")
-            published_recently = [
+            slot_utc = slot - timedelta(hours=8)
+            win_start = (slot_utc - timedelta(minutes=30)).strftime("%Y-%m-%dT%H:%M")
+            win_end   = (slot_utc + timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M")
+            posts_in_slot = [
                 {"id": p["id"], "published_at": _pa(p)}
-                for p in recent[:5]
-                if _pa(p)[:16] >= cutoff_utc
+                for p in recent_all[:10]
+                if win_start <= _pa(p)[:16] <= win_end
             ]
             slot_analysis.append({
                 "time": time_str, "slot_iso": slot_iso,
+                "slot_window_utc": f"[{win_start}..{win_end}]",
                 "in_window": in_window, "key": key,
                 "key_triggered": key in _auto_post_triggered,
-                "posts_in_last_2h": published_recently,
+                "already_published": bool(posts_in_slot),
+                "posts_in_slot_window": posts_in_slot,
             })
         except Exception as e:
             slot_analysis.append({"time": time_str, "error": str(e)})
@@ -1026,7 +1033,6 @@ async def autopilot_debug():
         "auto_post_times": times,
         "auto_post_running": _auto_post_running,
         "triggered_keys": sorted(_auto_post_triggered),
-        "cutoff_utc_2h": cutoff_utc,
         "slot_analysis": slot_analysis,
         "recent_5_published": recent5,
     }
