@@ -1,12 +1,13 @@
 import os
 import logging
+from datetime import datetime
 from zoneinfo import ZoneInfo
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 logger = logging.getLogger(__name__)
 
-MOSCOW_TZ = ZoneInfo("Europe/Moscow")
+MOSCOW_TZ = ZoneInfo("Asia/Irkutsk")
 
 scheduler = AsyncIOScheduler()
 _publish_callback = None
@@ -26,10 +27,15 @@ async def _keep_alive():
         pass
 
 
-async def _check_scheduled():
-    """Every minute: publish posts whose scheduled_at has passed."""
+async def _refresh_currency():
+    """Every 5 minutes: refresh CBR exchange rates into cache."""
+    from currency_service import refresh_rates
+    await refresh_rates()
+
+
+async def check_scheduled():
+    """Publish all scheduled posts whose scheduled_at has passed. Called every minute and on each /health ping."""
     import database as db
-    from datetime import datetime
 
     now = datetime.now(MOSCOW_TZ).replace(tzinfo=None)
     for post in db.get_scheduled_posts():
@@ -52,16 +58,27 @@ def start(publish_callback):
     _publish_callback = publish_callback
 
     scheduler.add_job(
-        _check_scheduled,
+        check_scheduled,
         "interval",
         minutes=1,
         id="check_scheduled",
         replace_existing=True,
+        next_run_time=datetime.now(MOSCOW_TZ),
+        misfire_grace_time=3600,  # catch up within 1 hour after sleep/restart
+    )
+    scheduler.add_job(
+        _refresh_currency,
+        "interval",
+        minutes=5,
+        id="refresh_currency",
+        replace_existing=True,
+        next_run_time=datetime.now(MOSCOW_TZ),
+        misfire_grace_time=300,
     )
     scheduler.add_job(
         _keep_alive,
         "interval",
-        minutes=10,
+        minutes=5,  # reduced from 10 to keep Render awake longer
         id="keep_alive",
         replace_existing=True,
     )
@@ -92,6 +109,7 @@ def apply_auto_post(times: list[str], enabled: bool, auto_post_callback):
                 CronTrigger(hour=hour, minute=minute, timezone=MOSCOW_TZ),
                 id=f"auto_post_{i}",
                 replace_existing=True,
+                misfire_grace_time=3600,
             )
             logger.info(f"Auto-post job at {t}")
         except Exception as e:

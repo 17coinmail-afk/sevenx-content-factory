@@ -36,6 +36,118 @@
   </div>
 </div>
 
+<!-- Auth Modal -->
+<div x-show="authModal" x-cloak class="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm">
+  <div class="bg-[#0f2018] border border-[#2d6a4f] rounded-2xl p-8 w-full max-w-sm shadow-2xl">
+    <div class="text-center mb-6">
+      <div class="text-4xl mb-3">🔐</div>
+      <h2 class="text-xl font-bold">Вход</h2>
+      <p class="text-[#5a8a6a] text-sm mt-1">Введите пароль администратора</p>
+    </div>
+    <form @submit.prevent="submitAuth()">
+      <input type="password" x-model="authPassword" placeholder="Пароль" autofocus
+             class="w-full bg-[#162e20] border border-[#2d4a35] rounded-xl px-4 py-3 text-white placeholder-[#3d6b52] focus:outline-none focus:border-[#6bbf8e] mb-3">
+      <p x-show="authError" x-text="authError" class="text-red-400 text-sm mb-3 text-center"></p>
+      <button type="submit" class="w-full bg-[#2d6a4f] hover:bg-[#3d8a65] text-white font-semibold py-3 rounded-xl transition-all">Войти</button>
+    </form>
+  </div>
+</div>
+
+<!-- ═══ CALENDAR POST EDIT MODAL ════════════════════════════════════════════ -->
+<div x-show="calEditModal" @click.self="calEditModal=false"
+     class="fixed inset-0 bg-black/70 flex items-start justify-center z-40 p-4 overflow-y-auto" x-cloak>
+  <div class="bg-[#0f2018] border border-[#1a3328] rounded-2xl w-full max-w-2xl my-4 shadow-2xl">
+    <!-- Header -->
+    <div class="flex justify-between items-center p-5 border-b border-[#1a3328]">
+      <div>
+        <span class="font-bold text-base" x-text="calEditPost?.topic ? calEditPost.topic.substring(0,60) : 'Редактировать пост'"></span>
+        <div class="flex items-center gap-2 mt-1">
+          <span x-show="calEditPost?.status==='published'" class="text-xs text-[#6bbf8e]">✓ Опубликован</span>
+          <span x-show="calEditPost?.status==='scheduled'" class="text-xs text-[#5a8a6a]">⏰ <span x-text="fmtDate(calEditPost?.scheduled_at)"></span></span>
+          <span x-show="calEditPost?.format" class="text-[10px] bg-[#152b1f] text-[#5a8a6a] px-2 py-0.5 rounded-full" x-text="fmtBadge(calEditPost?.format)"></span>
+        </div>
+      </div>
+      <button @click="calEditModal=false" class="text-[#3d6b52] hover:text-white text-2xl leading-none w-8 h-8 flex items-center justify-center">×</button>
+    </div>
+
+    <div class="p-5 space-y-4">
+      <!-- Image -->
+      <div>
+        <div class="flex items-center justify-between mb-2">
+          <label class="text-xs text-[#5a8a6a]">Изображение</label>
+          <button @click="regenCalImage()" :disabled="calEditImgLoading"
+                  class="bg-[#071410] border border-[#1a3328] hover:border-[#2d6a4f] text-[#5a8a6a] hover:text-white text-xs px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 disabled:opacity-40">
+            <svg x-show="calEditImgLoading" class="spin w-3 h-3" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+            </svg>
+            <span x-text="calEditImgLoading ? 'Генерируем...' : '🎨 Новая картинка'"></span>
+          </button>
+        </div>
+        <div x-show="calEditImageUrl" class="rounded-xl overflow-hidden aspect-video bg-[#071410] flex items-center justify-center">
+          <img :src="calEditImageUrl" class="w-full h-full object-cover rounded-xl">
+        </div>
+        <div x-show="!calEditImageUrl" class="rounded-xl bg-[#071410] h-24 flex items-center justify-center text-[#3d6b52] text-sm border border-[#1a3328]">
+          Нет изображения
+        </div>
+      </div>
+
+      <!-- Text -->
+      <div>
+        <div class="flex items-center justify-between mb-2">
+          <label class="text-xs text-[#5a8a6a]">Текст поста</label>
+          <span class="text-[10px] text-[#3d6b52]" x-text="calEditText.length + ' симв.'"></span>
+        </div>
+        <textarea x-model="calEditText" rows="12"
+                  class="w-full bg-[#071410] border border-[#1a3328] focus:border-[#6bbf8e] text-[#c8e6d0] rounded-xl px-4 py-3 text-sm focus:outline-none transition-colors resize-y leading-relaxed"></textarea>
+      </div>
+
+      <!-- Hashtags -->
+      <div>
+        <label class="block text-xs text-[#5a8a6a] mb-2">Хэштеги</label>
+        <input x-model="calEditHashtags" placeholder="#хэштеги"
+               class="w-full bg-[#071410] border border-[#1a3328] focus:border-[#6bbf8e] text-[#5a8a6a] rounded-xl px-4 py-2.5 text-xs focus:outline-none transition-colors">
+      </div>
+
+      <!-- AI Rebuild section -->
+      <div class="bg-[#071410] border border-[#1a3328] rounded-xl p-4">
+        <div class="text-xs font-semibold text-[#5a8a6a] mb-2">🤖 Пересборка через AI</div>
+        <div class="flex gap-2">
+          <input x-model="calEditRebuildPrompt"
+                 placeholder="Напишите что изменить: 'сделай короче', 'добавь кейс', 'перепиши в стиле новостей'..."
+                 @keydown.enter="rebuildCalText()"
+                 class="flex-1 bg-[#0a1910] border border-[#1a3328] focus:border-[#6bbf8e] text-white rounded-xl px-3 py-2.5 text-xs focus:outline-none transition-colors placeholder-[#2d5040]">
+          <button @click="rebuildCalText()" :disabled="calEditRebuilding"
+                  class="bg-[#2d6a4f] hover:bg-[#3d8a65] disabled:opacity-40 text-white text-xs font-semibold px-4 py-2.5 rounded-xl transition-all flex items-center gap-1.5 flex-shrink-0 whitespace-nowrap">
+            <svg x-show="calEditRebuilding" class="spin w-3 h-3" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+            </svg>
+            <span x-text="calEditRebuilding ? 'Генерируем...' : 'Пересобрать'"></span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="flex gap-3 p-5 border-t border-[#1a3328]">
+      <button @click="saveCalEdit()" :disabled="calEditSaving"
+              class="flex-1 bg-[#2d6a4f] hover:bg-[#3d8a65] disabled:opacity-40 text-white font-bold py-3 rounded-xl transition-all flex items-center justify-center gap-2">
+        <svg x-show="calEditSaving" class="spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+        </svg>
+        <span x-text="calEditSaving ? 'Сохраняем...' : '💾 Сохранить изменения'"></span>
+      </button>
+      <button x-show="calEditPost?.status !== 'published'" @click="pubCalPost()" :disabled="calEditSaving"
+              class="bg-[#071410] border border-[#2d6a4f] hover:bg-[#2d6a4f] disabled:opacity-40 text-white text-sm font-semibold px-4 py-3 rounded-xl transition-all">
+        📤 Опубликовать
+      </button>
+      <button @click="deleteCalPost()" class="bg-red-900/20 hover:bg-red-900/40 border border-red-800/30 text-red-400 text-sm px-4 py-3 rounded-xl transition-all">🗑</button>
+    </div>
+  </div>
+</div>
+
 <div class="flex h-screen overflow-hidden">
 
   <!-- Sidebar -->
@@ -52,7 +164,7 @@
                 class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all">
           <span x-text="item.icon" class="text-base w-5 text-center"></span>
           <span x-text="item.label"></span>
-          <span x-show="item.id==='queue' && queueCount>0"
+          <span x-show="item.id==='history' && queueCount>0"
                 class="ml-auto bg-[#6bbf8e] text-[#071410] text-xs px-2 py-0.5 rounded-full font-bold"
                 x-text="queueCount"></span>
         </button>
@@ -68,7 +180,7 @@
       </button>
     </div>
 
-    <!-- Currency widget -->
+    <!-- Sidebar currency widget -->
     <div class="border-t border-[#152b1f] pt-3 mt-3">
       <div class="text-[#3d6b52] text-xs px-1 mb-2">Курсы ЦБ РФ</div>
       <template x-for="[cur, rate] in Object.entries(currency.rates||{})" :key="cur">
@@ -84,295 +196,160 @@
   <main class="flex-1 overflow-y-auto">
 
     <!-- ═══ PANEL ════════════════════════════════════════════════════════════ -->
-    <div x-show="tab==='panel'" class="p-5 xl:p-6 max-w-7xl mx-auto fade-in">
+    <div x-show="tab==='panel'" class="p-5 xl:p-6 max-w-4xl mx-auto fade-in">
       <div class="mb-5">
-        <h1 class="text-xl font-bold">Панель управления</h1>
-        <p class="text-[#5a8a6a] text-sm mt-0.5">Создание постов и управление автопилотом</p>
+        <h1 class="text-xl font-bold">Создать пост вручную</h1>
+        <p class="text-[#5a8a6a] text-sm mt-0.5">Генерация одного поста с выбором варианта</p>
       </div>
 
-      <div class="flex gap-5 items-start flex-col xl:flex-row">
-
-        <!-- ──── Left: post creator ──────────────────────────────────────── -->
-        <div class="flex-1 min-w-0 space-y-4">
-
-          <!-- Creator card -->
-          <div class="bg-[#0f2018] border border-[#1a3328] rounded-2xl p-5">
-
-            <!-- Topic -->
-            <div class="mb-4">
-              <label class="block text-xs text-[#5a8a6a] mb-2">Тема поста</label>
-              <div class="flex gap-2 mb-2.5">
-                <input x-model="gen.topic" placeholder="Введите тему или выберите ниже..."
-                       @keydown.enter="generate()"
-                       class="flex-1 bg-[#071410] border border-[#1a3328] text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-[#6bbf8e] transition-colors placeholder-[#2d5040]">
-                <button @click="gen.topic=presets[Math.floor(Math.random()*presets.length)]"
-                        title="Случайная тема"
-                        class="bg-[#071410] border border-[#1a3328] hover:border-[#6bbf8e] text-[#5a8a6a] hover:text-[#6bbf8e] px-3 rounded-xl transition-all text-lg">🎲</button>
-              </div>
-              <div class="flex flex-wrap gap-1.5">
-                <template x-for="p in presets" :key="p">
-                  <button @click="gen.topic=p"
-                          :class="gen.topic===p?'bg-[#2d6a4f] border-[#6bbf8e] text-white':'border-[#1a3328] text-[#3d6b52] hover:text-[#5a8a6a] hover:border-[#2d6a4f]'"
-                          class="text-xs px-2.5 py-1 rounded-lg border transition-all" x-text="p"></button>
-                </template>
-              </div>
-            </div>
-
-            <!-- Format -->
-            <div class="mb-4">
-              <div class="text-xs text-[#5a8a6a] mb-2">Формат:</div>
-              <div class="grid grid-cols-2 gap-2">
-                <button @click="gen.postFormat='promo'"
-                        :class="gen.postFormat==='promo'?'bg-[#2d6a4f] border-[#6bbf8e] text-white':'border-[#1a3328] text-[#5a8a6a] hover:border-[#2d6a4f]'"
-                        class="px-4 py-3 rounded-xl border transition-all text-left">
-                  <div class="text-sm font-semibold">⚡ Продающий</div>
-                  <div class="text-[11px] opacity-60 mt-0.5">400–650 симв. · крючок + CTA</div>
-                </button>
-                <button @click="gen.postFormat='article'"
-                        :class="gen.postFormat==='article'?'bg-[#2d6a4f] border-[#6bbf8e] text-white':'border-[#1a3328] text-[#5a8a6a] hover:border-[#2d6a4f]'"
-                        class="px-4 py-3 rounded-xl border transition-all text-left">
-                  <div class="text-sm font-semibold">📰 Статья</div>
-                  <div class="text-[11px] opacity-60 mt-0.5">1800–2600 симв. · гайд + факты</div>
-                </button>
-              </div>
-            </div>
-
-            <!-- Style -->
-            <div class="mb-5">
-              <div class="text-xs text-[#5a8a6a] mb-2">Стиль подачи:</div>
-              <div class="flex gap-2 flex-wrap">
-                <template x-for="s in styles" :key="s.id">
-                  <button @click="gen.style=s.id"
-                          :class="gen.style===s.id?'bg-[#2d6a4f] border-[#6bbf8e] text-white':'border-[#1a3328] text-[#5a8a6a] hover:border-[#2d6a4f]'"
-                          class="text-sm px-4 py-2 rounded-xl border transition-all">
-                    <span x-text="s.icon+' '+s.label"></span>
-                  </button>
-                </template>
-              </div>
-            </div>
-
-            <!-- Generate -->
-            <button @click="generate()" :disabled="!gen.topic||gen.loading"
-                    class="w-full bg-[#2d6a4f] hover:bg-[#3d8a65] active:bg-[#245c43] disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold py-3.5 rounded-xl transition-all flex items-center justify-center gap-2 text-sm">
-              <svg x-show="gen.loading" class="spin w-4 h-4" fill="none" viewBox="0 0 24 24">
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
-              </svg>
-              <span x-text="gen.loading?'Генерируем варианты...':'🚀 Сгенерировать 3 варианта'"></span>
-            </button>
+      <!-- Creator card -->
+      <div class="bg-[#0f2018] border border-[#1a3328] rounded-2xl p-5 mb-5">
+        <!-- Topic input -->
+        <div class="mb-4">
+          <label class="block text-xs text-[#5a8a6a] mb-2">Тема <span class="text-[#3d6b52]">(необязательно — оставьте пустым для случайной)</span></label>
+          <div class="flex gap-2">
+            <input x-model="gen.topic"
+                   placeholder="Например: Платежи из Китая в 2025 году..."
+                   @keydown.enter="generate()"
+                   class="flex-1 bg-[#071410] border border-[#1a3328] text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-[#6bbf8e] transition-colors placeholder-[#2d5040]">
+            <button @click="gen.topic=randomTopic()"
+                    title="Случайная тема"
+                    class="bg-[#071410] border border-[#1a3328] hover:border-[#6bbf8e] text-[#5a8a6a] hover:text-[#6bbf8e] px-3 rounded-xl transition-all text-lg">🎲</button>
           </div>
+        </div>
 
-          <!-- Variants -->
-          <div x-show="gen.variants.length" class="space-y-4 fade-in">
-            <div class="text-xs font-semibold text-[#5a8a6a] uppercase tracking-wide">Выберите вариант и опубликуйте:</div>
-
-            <template x-for="(v, i) in gen.variants" :key="i">
-              <div :class="gen.selected===i?'border-[#6bbf8e] ring-1 ring-[#6bbf8e]/30':'border-[#1a3328]'"
-                   class="bg-[#0f2018] border-2 rounded-2xl p-5 transition-all">
-                <!-- Header -->
-                <div class="flex items-center justify-between mb-3">
-                  <div class="flex items-center gap-2">
-                    <span class="text-xs font-bold text-[#6bbf8e] uppercase tracking-wider">Вариант <span x-text="i+1"></span></span>
-                    <span :class="gen.postFormat==='article'?'bg-blue-900/40 text-blue-300':'bg-[#6bbf8e]/10 text-[#6bbf8e]'"
-                          class="text-[10px] px-2 py-0.5 rounded-full font-semibold"
-                          x-text="gen.postFormat==='article'?'📰 Статья':'⚡ Промо'"></span>
-                    <span class="text-[10px] text-[#3d6b52]" x-text="v.text.length+' симв.'"></span>
-                  </div>
-                  <button @click="gen.selected=i"
-                          :class="gen.selected===i?'bg-[#2d6a4f] text-white':'border border-[#1a3328] text-[#5a8a6a] hover:border-[#6bbf8e] hover:text-[#6bbf8e]'"
-                          class="text-xs px-3 py-1.5 rounded-lg transition-all font-medium">
-                    <span x-text="gen.selected===i?'✓ Выбран':'Выбрать'"></span>
-                  </button>
-                </div>
-                <!-- Text view/edit -->
-                <div x-show="gen.editing!==i">
-                  <p class="text-sm text-[#c8e6d0] whitespace-pre-wrap leading-relaxed mb-2" x-text="v.text"></p>
-                  <p class="text-xs text-[#3d6b52]" x-text="v.hashtags"></p>
-                </div>
-                <div x-show="gen.editing===i">
-                  <textarea x-model="v.text" rows="8"
-                            class="w-full bg-[#071410] border border-[#1a3328] text-[#c8e6d0] rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-[#6bbf8e] mb-2 resize-y"></textarea>
-                  <input x-model="v.hashtags" placeholder="#хэштеги"
-                         class="w-full bg-[#071410] border border-[#1a3328] text-[#5a8a6a] rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-[#6bbf8e]">
-                </div>
-                <!-- Actions row -->
-                <div class="flex gap-2 mt-3 flex-wrap">
-                  <button @click="gen.editing=gen.editing===i?null:i"
-                          class="bg-[#071410] border border-[#1a3328] hover:border-[#2d6a4f] text-[#5a8a6a] text-xs px-3 py-1.5 rounded-lg transition-all">
-                    <span x-text="gen.editing===i?'💾 Готово':'✏️ Редактировать'"></span>
-                  </button>
-                  <button @click="generateImage(i)" :disabled="gen.imgLoading===i"
-                          class="bg-[#071410] border border-[#1a3328] hover:border-[#2d6a4f] text-[#5a8a6a] text-xs px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5">
-                    <svg x-show="gen.imgLoading===i" class="spin w-3 h-3" fill="none" viewBox="0 0 24 24">
-                      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
-                      <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
-                    </svg>
-                    <span x-text="gen.imgLoading===i?'Рисуем...':'🎨 Картинка'"></span>
-                  </button>
-                </div>
-
-                <!-- Image preview -->
-                <div x-show="v.image_url" class="mt-4">
-                  <img :src="v.image_url" class="rounded-xl max-w-xs w-full object-cover aspect-square">
-                </div>
-
-                <!-- Publish controls — appear inline when this variant is selected -->
-                <div x-show="gen.selected===i" class="mt-4 pt-4 border-t border-[#6bbf8e]/20 fade-in">
-                  <div class="flex flex-wrap gap-2 items-center">
-                    <button @click="publishNow()" :disabled="gen.publishing"
-                            class="bg-[#2d6a4f] hover:bg-[#3d8a65] active:bg-[#245c43] disabled:opacity-40 text-white text-sm font-bold px-5 py-2.5 rounded-xl transition-all flex items-center gap-2">
-                      <svg x-show="gen.publishing" class="spin w-4 h-4" fill="none" viewBox="0 0 24 24">
-                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
-                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
-                      </svg>
-                      <span x-text="gen.publishing?'Публикуем...':'📤 Опубликовать сейчас'"></span>
-                    </button>
-                    <input type="datetime-local" x-model="gen.scheduleAt"
-                           class="bg-[#071410] border border-[#1a3328] text-white rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-[#6bbf8e]">
-                    <button @click="schedulePost()" :disabled="!gen.scheduleAt"
-                            class="bg-[#071410] border border-[#1a3328] hover:border-[#2d6a4f] disabled:opacity-40 text-[#5a8a6a] hover:text-white text-sm px-4 py-2.5 rounded-xl transition-all whitespace-nowrap">
-                      🗓 Запланировать
-                    </button>
-                    <button @click="saveDraft()"
-                            class="bg-[#071410] border border-[#1a3328] hover:border-[#2d6a4f] text-[#5a8a6a] hover:text-white text-sm px-4 py-2.5 rounded-xl transition-all">
-                      💾 Черновик
-                    </button>
-                  </div>
-                </div>
-              </div>
+        <!-- Format -->
+        <div class="mb-4">
+          <div class="text-xs text-[#5a8a6a] mb-2">Формат:</div>
+          <div class="grid grid-cols-3 sm:grid-cols-5 gap-2">
+            <template x-for="f in formats" :key="f.id">
+              <button @click="gen.postFormat=f.id"
+                      :class="gen.postFormat===f.id?'bg-[#2d6a4f] border-[#6bbf8e] text-white':'border-[#1a3328] text-[#5a8a6a] hover:border-[#2d6a4f]'"
+                      class="px-3 py-2.5 rounded-xl border transition-all text-center">
+                <div class="text-sm" x-text="f.icon"></div>
+                <div class="text-xs mt-0.5 font-medium" x-text="f.label"></div>
+              </button>
             </template>
           </div>
         </div>
 
-        <!-- ──── Right: controls sidebar ────────────────────────────────── -->
-        <div class="w-full xl:w-72 flex-shrink-0 space-y-4">
 
-          <!-- Autopilot -->
-          <div class="bg-[#0f2018] border border-[#1a3328] rounded-2xl p-5">
+
+        <!-- Generate -->
+        <button @click="generate()" :disabled="gen.loading"
+                class="w-full bg-[#2d6a4f] hover:bg-[#3d8a65] active:bg-[#245c43] disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold py-3.5 rounded-xl transition-all flex items-center justify-center gap-2 text-sm">
+          <svg x-show="gen.loading" class="spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+          </svg>
+          <span x-text="gen.loading?'Генерируем варианты...':'🚀 Сгенерировать 3 варианта'"></span>
+        </button>
+      </div>
+
+      <!-- Variants -->
+      <div x-show="gen.variants.length" class="space-y-4 fade-in">
+        <div class="text-xs font-semibold text-[#5a8a6a] uppercase tracking-wide">Выберите вариант и опубликуйте:</div>
+        <template x-for="(v, i) in gen.variants" :key="i">
+          <div :class="gen.selected===i?'border-[#6bbf8e] ring-1 ring-[#6bbf8e]/30':'border-[#1a3328]'"
+               class="bg-[#0f2018] border-2 rounded-2xl p-5 transition-all">
             <div class="flex items-center justify-between mb-3">
-              <div>
-                <h2 class="text-sm font-bold">🤖 Автопилот</h2>
-                <p class="text-[10px] text-[#3d6b52] mt-0.5">Генерирует и публикует сам</p>
+              <div class="flex items-center gap-2">
+                <span class="text-xs font-bold text-[#6bbf8e] uppercase tracking-wider">Вариант <span x-text="i+1"></span></span>
+                <span class="text-[10px] bg-[#152b1f] text-[#5a8a6a] px-2 py-0.5 rounded-full" x-text="fmtBadge(gen.postFormat)"></span>
+                <span class="text-[10px] text-[#3d6b52]" x-text="v.text.length+' симв.'"></span>
               </div>
-              <div @click="sf.auto_generate_enabled=sf.auto_generate_enabled==='true'?'false':'true'"
-                   :class="sf.auto_generate_enabled==='true'?'bg-[#2d6a4f]':'bg-[#1a3328]'"
-                   class="w-11 h-6 rounded-full p-0.5 flex items-center transition-colors cursor-pointer flex-shrink-0">
-                <div :class="sf.auto_generate_enabled==='true'?'translate-x-5':'translate-x-0'"
-                     class="w-5 h-5 bg-white rounded-full transition-transform shadow-sm"></div>
+              <button @click="gen.selected=i"
+                      :class="gen.selected===i?'bg-[#2d6a4f] text-white':'border border-[#1a3328] text-[#5a8a6a] hover:border-[#6bbf8e] hover:text-[#6bbf8e]'"
+                      class="text-xs px-3 py-1.5 rounded-lg transition-all font-medium">
+                <span x-text="gen.selected===i?'✓ Выбран':'Выбрать'"></span>
+              </button>
+            </div>
+            <!-- Text view/edit -->
+            <div x-show="gen.editing!==i">
+              <p class="text-sm text-[#c8e6d0] whitespace-pre-wrap leading-relaxed mb-2" x-text="v.text"></p>
+              <p class="text-xs text-[#3d6b52]" x-text="v.hashtags"></p>
+            </div>
+            <div x-show="gen.editing===i">
+              <textarea x-model="v.text" rows="10"
+                        class="w-full bg-[#071410] border border-[#1a3328] text-[#c8e6d0] rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-[#6bbf8e] mb-2 resize-y"></textarea>
+              <input x-model="v.hashtags" placeholder="#хэштеги"
+                     class="w-full bg-[#071410] border border-[#1a3328] text-[#5a8a6a] rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-[#6bbf8e]">
+            </div>
+            <!-- Actions row -->
+            <div class="flex gap-2 mt-3 flex-wrap">
+              <button @click="gen.editing=gen.editing===i?null:i"
+                      class="bg-[#071410] border border-[#1a3328] hover:border-[#2d6a4f] text-[#5a8a6a] text-xs px-3 py-1.5 rounded-lg transition-all">
+                <span x-text="gen.editing===i?'💾 Готово':'✏️ Редактировать'"></span>
+              </button>
+              <button @click="generateImage(i)" :disabled="gen.imgLoading===i"
+                      class="bg-[#071410] border border-[#1a3328] hover:border-[#2d6a4f] text-[#5a8a6a] text-xs px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5">
+                <svg x-show="gen.imgLoading===i" class="spin w-3 h-3" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                </svg>
+                <span x-text="gen.imgLoading===i?'Рисуем...':'🎨 Картинка'"></span>
+              </button>
+            </div>
+            <!-- Image preview -->
+            <div x-show="v.image_url" class="mt-4">
+              <img :src="v.image_url" class="rounded-xl max-w-xs w-full object-cover aspect-square">
+            </div>
+            <!-- Publish controls -->
+            <div x-show="gen.selected===i" class="mt-4 pt-4 border-t border-[#6bbf8e]/20 fade-in">
+              <div class="flex flex-wrap gap-2 items-center">
+                <button @click="publishNow()" :disabled="gen.publishing"
+                        class="bg-[#2d6a4f] hover:bg-[#3d8a65] active:bg-[#245c43] disabled:opacity-40 text-white text-sm font-bold px-5 py-2.5 rounded-xl transition-all flex items-center gap-2">
+                  <svg x-show="gen.publishing" class="spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                  </svg>
+                  <span x-text="gen.publishing?'Публикуем...':'📤 Опубликовать сейчас'"></span>
+                </button>
+                <input type="datetime-local" x-model="gen.scheduleAt"
+                       class="bg-[#071410] border border-[#1a3328] text-white rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-[#6bbf8e]">
+                <button @click="schedulePost()" :disabled="!gen.scheduleAt"
+                        class="bg-[#071410] border border-[#1a3328] hover:border-[#2d6a4f] disabled:opacity-40 text-[#5a8a6a] hover:text-white text-sm px-4 py-2.5 rounded-xl transition-all whitespace-nowrap">
+                  🗓 Запланировать
+                </button>
               </div>
-            </div>
-            <div :class="sf.auto_generate_enabled==='true'?'bg-[#6bbf8e]/10 border-[#6bbf8e]/30 text-[#6bbf8e]':'bg-[#071410] border-[#1a3328] text-[#3d6b52]'"
-                 class="rounded-xl px-3 py-2 text-xs mb-3 border transition-all">
-              <span x-text="sf.auto_generate_enabled==='true'?'✓ Активен — публикует по расписанию':'○ Выключен'"></span>
-            </div>
-            <button @click="triggerAutopilot()" :disabled="sf.autopilotLoading"
-                    class="w-full bg-[#071410] border border-[#1a3328] hover:border-[#6bbf8e] hover:text-[#6bbf8e] disabled:opacity-40 text-[#5a8a6a] text-xs py-2.5 rounded-xl transition-all flex items-center justify-center gap-2 font-medium">
-              <svg x-show="sf.autopilotLoading" class="spin w-3 h-3" fill="none" viewBox="0 0 24 24">
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
-              </svg>
-              <span x-text="sf.autopilotLoading?'Генерируем и публикуем...':'▶ Запустить сейчас'"></span>
-            </button>
-            <button @click="generateWeek()" :disabled="sf.weekLoading"
-                    class="w-full bg-[#071410] border border-[#1a3328] hover:border-[#2d6a4f] hover:text-white disabled:opacity-40 text-[#5a8a6a] text-xs py-2.5 rounded-xl transition-all flex items-center justify-center gap-2 font-medium mt-2">
-              <svg x-show="sf.weekLoading" class="spin w-3 h-3" fill="none" viewBox="0 0 24 24">
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
-              </svg>
-              <span x-text="sf.weekLoading?'Запускаем...':'📅 Создать неделю (7 постов)'"></span>
-            </button>
-          </div>
-
-          <!-- Schedule -->
-          <div class="bg-[#0f2018] border border-[#1a3328] rounded-2xl p-5">
-            <div class="flex items-center justify-between mb-3">
-              <div>
-                <h2 class="text-sm font-bold">⏰ Расписание</h2>
-                <p class="text-[10px] text-[#3d6b52] mt-0.5">Время автопостинга</p>
-              </div>
-              <div @click="sf.auto_post_enabled=sf.auto_post_enabled==='true'?'false':'true'"
-                   :class="sf.auto_post_enabled==='true'?'bg-[#2d6a4f]':'bg-[#1a3328]'"
-                   class="w-11 h-6 rounded-full p-0.5 flex items-center transition-colors cursor-pointer flex-shrink-0">
-                <div :class="sf.auto_post_enabled==='true'?'translate-x-5':'translate-x-0'"
-                     class="w-5 h-5 bg-white rounded-full transition-transform shadow-sm"></div>
-              </div>
-            </div>
-            <div x-show="sf.auto_post_enabled==='true'" class="space-y-2">
-              <template x-for="(t, i) in autoTimes" :key="i">
-                <div class="flex gap-2">
-                  <input type="time" x-model="autoTimes[i]"
-                         class="flex-1 bg-[#071410] border border-[#1a3328] text-white rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-[#6bbf8e]">
-                  <button @click="autoTimes.splice(i,1)"
-                          class="bg-red-900/20 border border-red-800/30 text-red-400 text-xs px-3 py-2 rounded-xl transition-all hover:bg-red-900/40">✕</button>
-                </div>
-              </template>
-              <button @click="autoTimes.push('12:00')"
-                      class="w-full bg-[#071410] border border-[#1a3328] hover:border-[#2d6a4f] text-[#5a8a6a] text-xs px-4 py-2 rounded-xl transition-all">+ Добавить время</button>
-            </div>
-            <div x-show="sf.auto_post_enabled!=='true'" class="text-xs text-[#3d6b52] italic">
-              Включите чтобы задать время
             </div>
           </div>
-
-          <!-- Content settings -->
-          <div class="bg-[#0f2018] border border-[#1a3328] rounded-2xl p-5">
-            <h2 class="text-sm font-bold mb-4">📝 Настройки контента</h2>
-
-            <!-- Contact -->
-            <div class="mb-4">
-              <label class="block text-xs text-[#5a8a6a] mb-1.5">📞 Контакт для CTA</label>
-              <input x-model="sf.contact_info"
-                     :placeholder="settings.contact_info || 'Артём: +7 967 202-55-54'"
-                     class="w-full bg-[#071410] border border-[#1a3328] text-white rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-[#6bbf8e] transition-colors"/>
-            </div>
-
-            <!-- Currency toggle -->
-            <div class="mb-4">
-              <label class="flex items-center justify-between cursor-pointer" @click="gen.includeRates=!gen.includeRates">
-                <span class="text-xs text-[#5a8a6a]">💱 Добавлять курсы ЦБ в пост</span>
-                <div :class="gen.includeRates?'bg-[#2d6a4f]':'bg-[#1a3328]'"
-                     class="w-9 h-5 rounded-full p-0.5 flex items-center transition-colors flex-shrink-0 ml-2">
-                  <div :class="gen.includeRates?'translate-x-4':'translate-x-0'"
-                       class="w-4 h-4 bg-white rounded-full transition-transform"></div>
-                </div>
-              </label>
-            </div>
-
-            <!-- Brand voice -->
-            <div class="mb-4">
-              <label class="block text-xs text-[#5a8a6a] mb-1.5">🎙 Голос бренда</label>
-              <textarea x-model="sf.brand_voice" rows="4"
-                        placeholder="Оставьте пустым — используется стандартный промпт Seven-X"
-                        class="w-full bg-[#071410] border border-[#1a3328] text-white rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-[#6bbf8e] transition-colors resize-none placeholder-[#2d5040]"></textarea>
-            </div>
-
-            <!-- Save -->
-            <button @click="saveSettings()" :disabled="sf.saving"
-                    class="w-full bg-[#2d6a4f] hover:bg-[#3d8a65] disabled:opacity-40 text-white text-sm font-bold py-2.5 rounded-xl transition-all flex items-center justify-center gap-2">
-              <svg x-show="sf.saving" class="spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24">
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
-              </svg>
-              <span x-text="sf.saving?'Сохраняем...':'💾 Сохранить'"></span>
-            </button>
-          </div>
-
-        </div>
+        </template>
       </div>
     </div>
 
     <!-- ═══ CALENDAR ═════════════════════════════════════════════════════════ -->
     <div x-show="tab==='calendar'" class="p-6 fade-in">
-      <div class="flex items-center justify-between mb-5">
+      <div class="flex items-center justify-between mb-5 flex-wrap gap-3">
         <div>
           <h1 class="text-xl font-bold">Календарь</h1>
-          <p class="text-[#5a8a6a] text-sm mt-0.5">Расписание публикаций</p>
+          <p class="text-[#5a8a6a] text-sm mt-0.5">Расписание публикаций · кликните на пост чтобы редактировать</p>
         </div>
-        <div class="flex items-center gap-3">
-          <button @click="prevMonth()" class="bg-[#0f2018] border border-[#1a3328] hover:border-[#2d6a4f] text-[#5a8a6a] px-3 py-2 rounded-xl text-sm transition-all">←</button>
+        <div class="flex items-center gap-2 flex-wrap">
+          <!-- Create week button -->
+          <button @click="generateWeek()" :disabled="sf.weekLoading"
+                  class="bg-[#2d6a4f] hover:bg-[#3d8a65] disabled:opacity-60 text-white text-sm font-bold px-4 py-2.5 rounded-xl transition-all flex items-center gap-2 whitespace-nowrap">
+            <svg x-show="sf.weekLoading" class="spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+            </svg>
+            <span x-text="sf.weekLoading ? 'Создаём...' : '📅 Создать неделю (' + (Math.max(autoTimes.length,1) * 7) + ' постов)'"></span>
+          </button>
+          <!-- Month nav -->
+          <button @click="prevMonth()" class="bg-[#0f2018] border border-[#1a3328] hover:border-[#2d6a4f] text-[#5a8a6a] px-3 py-2.5 rounded-xl text-sm transition-all">←</button>
           <span class="text-white font-medium text-sm min-w-36 text-center" x-text="calMonthName"></span>
-          <button @click="nextMonth()" class="bg-[#0f2018] border border-[#1a3328] hover:border-[#2d6a4f] text-[#5a8a6a] px-3 py-2 rounded-xl text-sm transition-all">→</button>
+          <button @click="nextMonth()" class="bg-[#0f2018] border border-[#1a3328] hover:border-[#2d6a4f] text-[#5a8a6a] px-3 py-2.5 rounded-xl text-sm transition-all">→</button>
+          <button @click="loadCal()" title="Обновить" class="bg-[#0f2018] border border-[#1a3328] hover:border-[#2d6a4f] text-[#5a8a6a] px-3 py-2.5 rounded-xl text-sm transition-all">↻</button>
         </div>
+      </div>
+
+      <!-- Week gen loading banner -->
+      <div x-show="sf.weekLoading || calPolling" class="bg-[#2d6a4f]/20 border border-[#2d6a4f]/40 rounded-xl px-4 py-3 mb-4 text-sm text-[#6bbf8e] flex items-center gap-2">
+        <svg class="spin w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+        </svg>
+        <span x-text="sf.weekLoading ? 'AI генерирует посты — это займёт 2–4 минуты...' : 'Обновляем календарь...'"></span>
       </div>
 
       <div class="bg-[#0f2018] border border-[#1a3328] rounded-2xl overflow-hidden">
@@ -386,10 +363,8 @@
             <div :class="[
                    'min-h-20 p-2 border-b border-r border-[#1a3328]',
                    day.today?'bg-[#152b1f]':'',
-                   !day.cur?'opacity-30':'',
-                   day.posts?.length?'cursor-pointer hover:bg-[#152b1f]':''
-                 ]"
-                 @click="day.posts?.length&&(calDay=day)">
+                   !day.cur?'opacity-30':''
+                 ]">
               <div class="flex justify-between items-start mb-1">
                 <span :class="day.today?'bg-[#6bbf8e] text-[#071410] w-5 h-5 rounded-full flex items-center justify-center':'text-[#5a8a6a]'"
                       class="text-xs font-medium" x-text="day.d"></span>
@@ -397,35 +372,12 @@
                       class="text-xs bg-[#2d6a4f] text-white px-1.5 py-0.5 rounded-md leading-none"
                       x-text="day.posts.length"></span>
               </div>
-              <template x-for="p in (day.posts||[]).slice(0,2)" :key="p.id">
-                <div :class="p.status==='published'?'bg-[#6bbf8e]/15 border-[#6bbf8e]/25':'bg-[#2d6a4f]/15 border-[#2d6a4f]/25'"
-                     class="text-xs border rounded px-1 py-0.5 mb-0.5 truncate text-[#c8e6d0]"
-                     x-text="p.topic||p.text.substring(0,25)"></div>
+              <template x-for="p in (day.posts||[])" :key="p.id">
+                <div @click="day.cur && openCalPostEdit(p.id)"
+                     :class="p.status==='published'?'bg-[#6bbf8e]/15 border-[#6bbf8e]/30 hover:bg-[#6bbf8e]/25':'bg-[#2d6a4f]/15 border-[#2d6a4f]/30 hover:bg-[#2d6a4f]/30'"
+                     class="text-xs border rounded px-1.5 py-1 mb-0.5 truncate text-[#c8e6d0] cursor-pointer transition-colors"
+                     x-text="(p.time ? p.time+' ' : '') + (p.topic ? p.topic.substring(0,22) : p.text.substring(0,22))"></div>
               </template>
-              <div x-show="(day.posts||[]).length>2" class="text-xs text-[#3d6b52]"
-                   x-text="'+'+(day.posts.length-2)+' ещё'"></div>
-            </div>
-          </template>
-        </div>
-      </div>
-
-      <!-- Day detail modal -->
-      <div x-show="calDay" @click.self="calDay=null"
-           class="fixed inset-0 bg-black/60 flex items-center justify-center z-40 p-4" x-cloak>
-        <div class="bg-[#0f2018] border border-[#1a3328] rounded-2xl p-5 max-w-md w-full">
-          <div class="flex justify-between items-center mb-4">
-            <span class="font-semibold text-sm" x-text="calDay?.label"></span>
-            <button @click="calDay=null" class="text-[#3d6b52] hover:text-white text-lg leading-none">×</button>
-          </div>
-          <template x-for="p in calDay?.posts" :key="p.id">
-            <div :class="p.status==='published'?'border-[#6bbf8e]/30':'border-[#2d6a4f]/30'"
-                 class="border rounded-xl p-3 mb-2">
-              <div class="flex justify-between text-xs mb-1">
-                <span :class="p.status==='published'?'text-[#6bbf8e]':'text-[#5a8a6a]'"
-                      x-text="p.status==='published'?'✓ Опубликован':'⏰ Запланирован'"></span>
-                <span class="text-[#3d6b52]" x-text="fmtDate(p.scheduled_at||p.published_at)"></span>
-              </div>
-              <p class="text-sm text-[#c8e6d0] line-clamp-2" x-text="p.text"></p>
             </div>
           </template>
         </div>
@@ -434,19 +386,43 @@
 
     <!-- ═══ HISTORY ══════════════════════════════════════════════════════════ -->
     <div x-show="tab==='history'" class="p-6 fade-in">
-      <div class="flex items-center justify-between mb-5">
+      <div class="flex items-center justify-between mb-5 flex-wrap gap-3">
         <div>
           <h1 class="text-xl font-bold">История</h1>
-          <p class="text-[#5a8a6a] text-sm mt-0.5">Все опубликованные посты</p>
+          <p class="text-[#5a8a6a] text-sm mt-0.5">Запланированные и опубликованные посты</p>
         </div>
-        <div class="flex gap-2 text-xs flex-wrap">
+        <div class="flex gap-2 text-xs flex-wrap items-center">
           <button @click="histFilter='all'" :class="histFilter==='all'?'bg-[#2d6a4f] text-white':'bg-[#0f2018] text-[#5a8a6a] border border-[#1a3328]'" class="px-3 py-1.5 rounded-lg transition-all">Все</button>
           <button @click="histFilter='scheduled'" :class="histFilter==='scheduled'?'bg-[#2d6a4f] text-white':'bg-[#0f2018] text-[#5a8a6a] border border-[#1a3328]'" class="px-3 py-1.5 rounded-lg transition-all">
             ⏰ Запланированные
-            <span x-show="histPosts.filter(p=>p.status==='scheduled').length" class="ml-1 bg-[#6bbf8e] text-[#071410] px-1.5 py-0.5 rounded-full font-bold" x-text="histPosts.filter(p=>p.status==='scheduled').length"></span>
+            <span x-show="histPosts.filter(p=>p.status==='scheduled').length"
+                  class="ml-1 bg-[#6bbf8e] text-[#071410] px-1.5 py-0.5 rounded-full font-bold"
+                  x-text="histPosts.filter(p=>p.status==='scheduled').length"></span>
           </button>
-          <button @click="histFilter='published'" :class="histFilter==='published'?'bg-[#2d6a4f] text-white':'bg-[#0f2018] text-[#5a8a6a] border border-[#1a3328]'" class="px-3 py-1.5 rounded-lg transition-all">Опубликованные</button>
-          <button @click="histFilter='failed'" :class="histFilter==='failed'?'bg-red-800 text-white':'bg-[#0f2018] text-[#5a8a6a] border border-[#1a3328]'" class="px-3 py-1.5 rounded-lg transition-all">Ошибки</button>
+          <button @click="histFilter='published'" :class="histFilter==='published'?'bg-[#2d6a4f] text-white':'bg-[#0f2018] text-[#5a8a6a] border border-[#1a3328]'" class="px-3 py-1.5 rounded-lg transition-all">✓ Опубликованные</button>
+          <button @click="histFilter='failed'" :class="histFilter==='failed'?'bg-red-800 text-white':'bg-[#0f2018] text-[#5a8a6a] border border-[#1a3328]'" class="px-3 py-1.5 rounded-lg transition-all">
+            ✗ Ошибки
+            <span x-show="histPosts.filter(p=>p.status==='failed').length"
+                  class="ml-1 bg-red-600 text-white px-1.5 py-0.5 rounded-full font-bold"
+                  x-text="histPosts.filter(p=>p.status==='failed').length"></span>
+          </button>
+          <button @click="histFilter='draft'" :class="histFilter==='draft'?'bg-yellow-800 text-white':'bg-[#0f2018] text-[#5a8a6a] border border-[#1a3328]'" class="px-3 py-1.5 rounded-lg transition-all">
+            📝 Черновики
+            <span x-show="histPosts.filter(p=>p.status==='draft').length"
+                  class="ml-1 bg-yellow-600 text-white px-1.5 py-0.5 rounded-full font-bold"
+                  x-text="histPosts.filter(p=>p.status==='draft').length"></span>
+          </button>
+          <div class="flex-1"></div>
+          <button x-show="histPosts.filter(p=>p.status==='failed').length"
+                  @click="bulkDelete('failed')"
+                  class="bg-red-900/20 border border-red-800/30 text-red-400 hover:bg-red-900/40 px-3 py-1.5 rounded-lg transition-all">
+            🗑 Очистить ошибки
+          </button>
+          <button x-show="histPosts.filter(p=>p.status==='draft').length"
+                  @click="bulkDelete('draft')"
+                  class="bg-yellow-900/20 border border-yellow-800/30 text-yellow-500 hover:bg-yellow-900/40 px-3 py-1.5 rounded-lg transition-all">
+            🗑 Очистить черновики
+          </button>
         </div>
       </div>
 
@@ -457,68 +433,34 @@
 
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         <template x-for="p in filteredHist" :key="p.id">
-          <div :class="p.status==='failed'?'border-red-800/40':p.status==='scheduled'?'border-[#2d6a4f]/50':'border-[#1a3328]'"
+          <div :class="p.status==='failed'?'border-red-800/40':p.status==='scheduled'?'border-[#2d6a4f]/50':p.status==='draft'?'border-yellow-800/40':'border-[#1a3328]'"
                class="bg-[#0f2018] border rounded-2xl overflow-hidden">
             <div x-show="p.image_path" class="relative">
               <img :src="p.image_path" class="w-full h-44 object-cover">
-              <div :class="p.status==='published'?'bg-[#6bbf8e]/90 text-[#071410]':p.status==='scheduled'?'bg-[#2d6a4f]/90 text-white':'bg-red-700/90 text-white'"
+              <div :class="p.status==='published'?'bg-[#6bbf8e]/90 text-[#071410]':p.status==='scheduled'?'bg-[#2d6a4f]/90 text-white':p.status==='draft'?'bg-yellow-700/90 text-white':'bg-red-700/90 text-white'"
                    class="absolute top-2 right-2 backdrop-blur text-xs font-semibold px-2 py-1 rounded-lg"
-                   x-text="p.status==='published'?'✓ Опубликован':p.status==='scheduled'?'⏰ Запланирован':'✗ Ошибка'"></div>
+                   x-text="p.status==='published'?'✓ Опубликован':p.status==='scheduled'?'⏰ Запланирован':p.status==='draft'?'📝 Черновик':'✗ Ошибка'"></div>
             </div>
             <div class="p-4">
               <div class="flex items-center gap-2 mb-1 flex-wrap">
-                <span :class="p.status==='published'?'text-[#6bbf8e]':p.status==='scheduled'?'text-[#5a8a6a]':'text-red-400'"
+                <span :class="p.status==='published'?'text-[#6bbf8e]':p.status==='scheduled'?'text-[#5a8a6a]':p.status==='draft'?'text-yellow-500':'text-red-400'"
                       class="text-xs font-medium"
-                      x-text="p.status==='published'?'✓ Опубликован':p.status==='scheduled'?'⏰ Запланирован':'✗ Не отправлен'"></span>
+                      x-text="p.status==='published'?'✓ Опубликован':p.status==='scheduled'?'⏰ Запланирован':p.status==='draft'?'📝 Черновик':'✗ Не отправлен'"></span>
                 <span class="text-xs text-[#3d6b52]"
                       x-text="p.status==='scheduled'?fmtDate(p.scheduled_at):fmtDate(p.published_at||p.created_at)"></span>
-                <span x-show="p.format" :class="p.format==='article'?'bg-blue-900/30 text-blue-400':'bg-[#6bbf8e]/10 text-[#6bbf8e]'"
-                      class="text-[10px] px-1.5 py-0.5 rounded-full"
-                      x-text="p.format==='article'?'📰 Статья':'⚡ Промо'"></span>
+                <span x-show="p.format" class="text-[10px] bg-[#152b1f] text-[#5a8a6a] px-1.5 py-0.5 rounded-full" x-text="fmtBadge(p.format)"></span>
               </div>
               <p x-show="p.topic" class="text-xs text-[#5a8a6a] font-medium mb-1 truncate" x-text="p.topic"></p>
               <p class="text-sm text-[#c8e6d0] line-clamp-4 leading-relaxed" x-text="p.text"></p>
               <p x-show="p.hashtags" class="text-xs text-[#3d6b52] mt-2" x-text="p.hashtags"></p>
               <div class="mt-3 flex gap-2 flex-wrap">
-                <button x-show="p.status==='scheduled'" @click="pubPost(p.id,'history')"
-                        class="bg-[#2d6a4f] hover:bg-[#3d8a65] text-white text-xs px-3 py-1.5 rounded-lg transition-all">📤 Опубликовать сейчас</button>
-                <button x-show="p.status==='failed'" @click="pubPost(p.id,'history')"
-                        class="bg-[#2d6a4f] hover:bg-[#3d8a65] text-white text-xs px-3 py-1.5 rounded-lg transition-all">🔄 Повторить</button>
-                <button @click="delPost(p.id,'history')"
-                        class="bg-red-900/20 hover:bg-red-800/40 border border-red-800/30 text-red-400 text-xs px-3 py-1.5 rounded-lg transition-all">🗑</button>
-              </div>
-            </div>
-          </div>
-        </template>
-      </div>
-    </div>
-
-    <!-- ═══ DRAFTS ═════════════════════════════════════════════════════════════ -->
-    <div x-show="tab==='drafts'" class="p-6 max-w-2xl mx-auto fade-in">
-      <div class="mb-5">
-        <h1 class="text-xl font-bold">Черновики</h1>
-        <p class="text-[#5a8a6a] text-sm mt-0.5">Сохранённые, но не опубликованные</p>
-      </div>
-
-      <div x-show="!draftPosts.length" class="bg-[#0f2018] border border-[#1a3328] rounded-2xl p-10 text-center">
-        <div class="text-4xl mb-3">📝</div>
-        <p class="text-[#5a8a6a] text-sm">Нет черновиков.</p>
-      </div>
-
-      <div class="space-y-3">
-        <template x-for="p in draftPosts" :key="p.id">
-          <div class="bg-[#0f2018] border border-[#1a3328] rounded-2xl p-4 flex gap-4">
-            <div class="flex-shrink-0">
-              <img x-show="p.image_path" :src="p.image_path" class="w-14 h-14 rounded-xl object-cover">
-              <div x-show="!p.image_path" class="w-14 h-14 bg-[#152b1f] rounded-xl flex items-center justify-center text-2xl">📝</div>
-            </div>
-            <div class="flex-1 min-w-0">
-              <p class="text-xs text-[#3d6b52] mb-1" x-text="fmtDate(p.created_at)"></p>
-              <p class="text-sm text-[#c8e6d0] line-clamp-2 mb-3" x-text="p.text"></p>
-              <div class="flex gap-2">
-                <button @click="pubPost(p.id,'drafts')"
+                <button x-show="p.status==='scheduled'" @click="pubPost(p.id)"
                         class="bg-[#2d6a4f] hover:bg-[#3d8a65] text-white text-xs px-3 py-1.5 rounded-lg transition-all">📤 Опубликовать</button>
-                <button @click="delPost(p.id,'drafts')"
+                <button x-show="p.status==='draft'" @click="pubPost(p.id)"
+                        class="bg-[#2d6a4f] hover:bg-[#3d8a65] text-white text-xs px-3 py-1.5 rounded-lg transition-all">📤 Опубликовать</button>
+                <button x-show="p.status==='failed'" @click="pubPost(p.id)"
+                        class="bg-[#2d6a4f] hover:bg-[#3d8a65] text-white text-xs px-3 py-1.5 rounded-lg transition-all">🔄 Повторить</button>
+                <button @click="delPost(p.id)"
                         class="bg-red-900/20 hover:bg-red-800/40 border border-red-800/30 text-red-400 text-xs px-3 py-1.5 rounded-lg transition-all">🗑</button>
               </div>
             </div>
@@ -528,40 +470,109 @@
     </div>
 
     <!-- ═══ SETTINGS ══════════════════════════════════════════════════════════ -->
-    <div x-show="tab==='settings'" class="p-6 max-w-xl mx-auto fade-in">
+    <div x-show="tab==='settings'" class="p-6 max-w-2xl mx-auto fade-in">
       <div class="mb-5">
         <h1 class="text-xl font-bold">Настройки</h1>
-        <p class="text-[#5a8a6a] text-sm mt-0.5">API-ключи и подключения</p>
+        <p class="text-[#5a8a6a] text-sm mt-0.5">Автопилот, промпт, подключения и API-ключи</p>
       </div>
 
       <!-- Storage warning -->
       <div x-show="storageType==='sqlite_ephemeral'"
            class="bg-yellow-900/20 border border-yellow-600/40 rounded-2xl p-4 mb-4 text-xs text-yellow-300">
-        ⚠️ <b>SQLite:</b> данные сбрасываются при рестарте. Добавьте переменные окружения ниже — они сохранятся навсегда.
+        ⚠️ <b>SQLite:</b> данные сбрасываются при рестарте. Добавьте переменные окружения на Render — они сохранятся навсегда.
       </div>
 
-      <!-- Env vars status -->
+      <!-- ─── Autopilot & Schedule ─── -->
       <div class="bg-[#0f2018] border border-[#1a3328] rounded-2xl p-5 mb-4">
+        <h2 class="text-sm font-bold mb-4">🤖 Автопилот и расписание</h2>
+
+        <!-- Schedule toggle -->
         <div class="flex items-center justify-between mb-3">
-          <h2 class="text-sm font-semibold">🔒 Переменные окружения Render</h2>
-          <span class="text-[#3d6b52] text-xs">Постоянное хранение</span>
+          <div>
+            <div class="text-sm font-medium">Публикация по расписанию</div>
+            <div class="text-xs text-[#3d6b52] mt-0.5">Запланированные посты публикуются автоматически</div>
+          </div>
+          <div @click="sf.auto_post_enabled=sf.auto_post_enabled==='true'?'false':'true'"
+               :class="sf.auto_post_enabled==='true'?'bg-[#2d6a4f]':'bg-[#1a3328]'"
+               class="w-11 h-6 rounded-full p-0.5 flex items-center transition-colors cursor-pointer flex-shrink-0 ml-4">
+            <div :class="sf.auto_post_enabled==='true'?'translate-x-5':'translate-x-0'"
+                 class="w-5 h-5 bg-white rounded-full transition-transform shadow-sm"></div>
+          </div>
         </div>
-        <p class="text-[#3d6b52] text-xs mb-3">Добавьте в <b class="text-[#5a8a6a]">Render Dashboard → Environment</b> — не пропадут при перезапуске.</p>
-        <div class="space-y-2">
-          <template x-for="ev in envVars" :key="ev.name">
-            <div class="flex items-center justify-between py-1.5 px-3 rounded-xl bg-[#071410]">
-              <div class="flex items-center gap-2">
-                <span :class="ev.set ? 'text-[#6bbf8e]' : 'text-[#3d6b52]'" x-text="ev.set ? '✓' : '○'"></span>
-                <code class="text-xs text-[#5a8a6a]" x-text="ev.name"></code>
+
+        <!-- Auto-generate toggle -->
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <div class="text-sm font-medium">Авто-генерация</div>
+            <div class="text-xs text-[#3d6b52] mt-0.5">Если очередь пуста — AI создаст новый пост сам</div>
+          </div>
+          <div @click="sf.auto_generate_enabled=sf.auto_generate_enabled==='true'?'false':'true'"
+               :class="sf.auto_generate_enabled==='true'?'bg-[#2d6a4f]':'bg-[#1a3328]'"
+               class="w-11 h-6 rounded-full p-0.5 flex items-center transition-colors cursor-pointer flex-shrink-0 ml-4">
+            <div :class="sf.auto_generate_enabled==='true'?'translate-x-5':'translate-x-0'"
+                 class="w-5 h-5 bg-white rounded-full transition-transform shadow-sm"></div>
+          </div>
+        </div>
+
+        <!-- Time slots -->
+        <div class="mb-1">
+          <label class="block text-xs text-[#5a8a6a] mb-2">Время публикаций (Иркутск, UTC+8):</label>
+          <div class="space-y-2">
+            <template x-for="(t, i) in autoTimes" :key="i">
+              <div class="flex gap-2">
+                <input type="time" x-model="autoTimes[i]"
+                       class="flex-1 bg-[#071410] border border-[#1a3328] text-white rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-[#6bbf8e]">
+                <button @click="autoTimes.splice(i,1)"
+                        class="bg-red-900/20 border border-red-800/30 text-red-400 text-xs px-3 py-2 rounded-xl transition-all hover:bg-red-900/40">✕</button>
               </div>
-              <span :class="ev.set ? 'text-[#6bbf8e] bg-[#6bbf8e]/10' : 'text-[#3d6b52] bg-[#152b1f]'"
-                    class="text-xs px-2 py-0.5 rounded-lg" x-text="ev.set ? 'установлено' : 'не задано'"></span>
-            </div>
-          </template>
+            </template>
+            <button @click="autoTimes.push('12:00')"
+                    class="w-full bg-[#071410] border border-[#1a3328] hover:border-[#2d6a4f] text-[#5a8a6a] text-xs px-4 py-2 rounded-xl transition-all">+ Добавить время</button>
+          </div>
         </div>
       </div>
 
-      <!-- AI Provider -->
+      <!-- ─── Brand Voice ─── -->
+      <div class="bg-[#0f2018] border border-[#1a3328] rounded-2xl p-5 mb-4">
+        <div class="flex items-center justify-between mb-1">
+          <h2 class="text-sm font-bold">🎙 Промпт бренда</h2>
+          <button @click="loadDefaultBrandVoice()"
+                  class="text-xs text-[#3d6b52] hover:text-[#6bbf8e] transition-colors underline-offset-2 hover:underline">
+            ↓ Стандартный промпт Seven-X
+          </button>
+        </div>
+        <p class="text-xs text-[#3d6b52] mb-3">Дополнительные инструкции — стиль, акценты, запреты. Добавляются поверх базового промпта. Оставьте пустым чтобы использовать базовый.</p>
+        <textarea x-model="sf.brand_voice" rows="10"
+                  placeholder="Пример: 'Всегда начинай с цифры или конкретного факта. Пиши коротко — максимум 1800 символов. Обязательно упоминай скорость платежа (рубли утром — поручение вечером). Избегай слова «осуществить».'&#10;&#10;Нажмите «Стандартный промпт Seven-X» чтобы загрузить готовый вариант и отредактировать его."
+                  class="w-full bg-[#071410] border border-[#1a3328] text-white rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-[#6bbf8e] transition-colors resize-y placeholder-[#2d5040] leading-relaxed"></textarea>
+      </div>
+
+      <!-- ─── Contact & Currency ─── -->
+      <div class="bg-[#0f2018] border border-[#1a3328] rounded-2xl p-5 mb-4">
+        <h2 class="text-sm font-bold mb-4">📞 Контакт и оформление</h2>
+
+        <div class="mb-4">
+          <label class="block text-xs text-[#5a8a6a] mb-1.5">Контакт для CTA (в постах)</label>
+          <input x-model="sf.contact_info"
+                 placeholder="+7 967 202-55-54"
+                 class="w-full bg-[#071410] border border-[#1a3328] text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-[#6bbf8e] transition-colors"/>
+        </div>
+
+        <div class="flex items-center justify-between">
+          <div>
+            <div class="text-sm font-medium">Добавлять курс ЦБ в каждый пост</div>
+            <div class="text-xs text-[#3d6b52] mt-0.5">Актуальный курс прикрепляется при публикации</div>
+          </div>
+          <div @click="sf.add_rates_to_posts=sf.add_rates_to_posts==='true'?'false':'true'"
+               :class="sf.add_rates_to_posts==='true'?'bg-[#2d6a4f]':'bg-[#1a3328]'"
+               class="w-11 h-6 rounded-full p-0.5 flex items-center transition-colors cursor-pointer flex-shrink-0 ml-4">
+            <div :class="sf.add_rates_to_posts==='true'?'translate-x-5':'translate-x-0'"
+                 class="w-5 h-5 bg-white rounded-full transition-transform shadow-sm"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ─── AI Provider ─── -->
       <div class="bg-[#0f2018] border border-[#1a3328] rounded-2xl p-5 mb-4">
         <h2 class="text-sm font-semibold mb-3">🤖 AI Провайдер</h2>
         <div class="flex gap-2 mb-4">
@@ -586,19 +597,19 @@
             </div>
           </div>
           <div>
-            <label class="block text-xs text-[#5a8a6a] mb-1">Base URL <span class="text-[#3d6b52] font-normal">(пусто = OpenAI)</span></label>
+            <label class="block text-xs text-[#5a8a6a] mb-1">Base URL <span class="text-[#3d6b52]">(пусто = OpenAI)</span></label>
             <input x-model="sf.ai_base_url" placeholder="https://api.groq.com/openai/v1"
                    class="w-full bg-[#071410] border border-[#1a3328] text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-[#6bbf8e] transition-colors placeholder-[#2d5040]">
           </div>
           <div>
-            <label class="block text-xs text-[#5a8a6a] mb-1">Модель <span class="text-[#3d6b52] font-normal">(пусто = авто)</span></label>
+            <label class="block text-xs text-[#5a8a6a] mb-1">Модель <span class="text-[#3d6b52]">(пусто = авто)</span></label>
             <input x-model="sf.ai_model" placeholder="llama-3.3-70b-versatile"
                    class="w-full bg-[#071410] border border-[#1a3328] text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-[#6bbf8e] transition-colors placeholder-[#2d5040]">
           </div>
         </div>
       </div>
 
-      <!-- Image Provider -->
+      <!-- ─── Image Provider ─── -->
       <div class="bg-[#0f2018] border border-[#1a3328] rounded-2xl p-5 mb-4">
         <h2 class="text-sm font-semibold mb-3">🖼 Картинки</h2>
         <div class="flex gap-2 mb-3">
@@ -633,13 +644,13 @@
         </div>
       </div>
 
-      <!-- Telegram -->
+      <!-- ─── Telegram ─── -->
       <div class="bg-[#0f2018] border border-[#1a3328] rounded-2xl p-5 mb-4">
         <h2 class="text-sm font-semibold mb-4">🔑 Telegram Bot</h2>
-        <div>
+        <div class="mb-4">
           <label class="block text-xs text-[#5a8a6a] mb-1">Bot Token</label>
           <div class="flex gap-2">
-            <input x-model="sf.telegram_bot_token" type="password" placeholder="Введите новый токен чтобы изменить"
+            <input x-model="sf.telegram_bot_token" type="password" placeholder="Введите новый токен"
                    class="flex-1 bg-[#071410] border border-[#1a3328] text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-[#6bbf8e] transition-colors placeholder-[#2d5040]">
             <button @click="testTg()"
                     class="bg-[#071410] border border-[#1a3328] hover:border-[#2d6a4f] text-[#5a8a6a] text-sm px-4 py-2.5 rounded-xl transition-all flex-shrink-0">Тест</button>
@@ -649,11 +660,6 @@
             <span class="text-[#6bbf8e] text-xs font-mono" x-text="settings.telegram_bot_token_masked"></span>
           </div>
         </div>
-      </div>
-
-      <!-- Channels -->
-      <div class="bg-[#0f2018] border border-[#1a3328] rounded-2xl p-5 mb-4">
-        <h2 class="text-sm font-semibold mb-4">📢 Telegram каналы</h2>
         <div class="space-y-3">
           <div>
             <label class="block text-xs text-[#5a8a6a] mb-1">Канал 1</label>
@@ -662,7 +668,7 @@
                    class="w-full bg-[#071410] border border-[#1a3328] text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-[#6bbf8e] transition-colors placeholder-[#2d5040]">
           </div>
           <div>
-            <label class="block text-xs text-[#5a8a6a] mb-1">Канал 2</label>
+            <label class="block text-xs text-[#5a8a6a] mb-1">Канал 2 <span class="text-[#3d6b52]">(необязательно)</span></label>
             <input x-model="sf.channel_2_id"
                    :placeholder="settings.channel_2_id||'@channel или -1001234567890'"
                    class="w-full bg-[#071410] border border-[#1a3328] text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-[#6bbf8e] transition-colors placeholder-[#2d5040]">
@@ -670,16 +676,39 @@
         </div>
       </div>
 
-      <!-- Save -->
+      <!-- ─── Save ─── -->
       <button @click="saveSettings()" :disabled="sf.saving"
-              class="w-full bg-[#2d6a4f] hover:bg-[#3d8a65] disabled:opacity-40 text-white font-semibold py-3 rounded-xl transition-all flex items-center justify-center gap-2">
-        <svg x-show="sf.saving" class="spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+              class="w-full bg-[#2d6a4f] hover:bg-[#3d8a65] disabled:opacity-40 text-white font-bold py-4 rounded-2xl transition-all flex items-center justify-center gap-2 text-base mb-6">
+        <svg x-show="sf.saving" class="spin w-5 h-5" fill="none" viewBox="0 0 24 24">
           <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
           <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
         </svg>
-        <span x-text="sf.saving?'Сохраняем...':'💾 Сохранить настройки'"></span>
+        <span x-text="sf.saving?'Сохраняем...':'💾 Сохранить все настройки'"></span>
       </button>
-    </div>
+
+      <!-- ─── Currency rates (always at bottom) ─── -->
+      <div class="bg-[#0f2018] border border-[#1a3328] rounded-2xl p-5">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-sm font-semibold">💱 Актуальные курсы ЦБ РФ</h2>
+          <button @click="loadCurrency()" class="text-[#3d6b52] hover:text-[#6bbf8e] text-xs transition-colors">↻ Обновить</button>
+        </div>
+        <div x-show="currency.date" class="text-xs text-[#3d6b52] mb-3" x-text="'На ' + currency.date + ' · источник: ' + (currency.source||'ЦБ РФ')"></div>
+        <div x-show="!currency.date" class="text-xs text-[#3d6b52] mb-3">Загрузка данных...</div>
+        <div class="grid grid-cols-2 gap-2">
+          <template x-for="[cur, rate] in Object.entries(currency.rates||{})" :key="cur">
+            <div class="bg-[#071410] rounded-xl px-4 py-3 flex justify-between items-center">
+              <div>
+                <span class="text-[#5a8a6a] text-xs font-medium" x-text="cur"></span>
+                <span class="text-[#3d6b52] text-[10px] ml-1" x-text="cur==='USD'?'🇺🇸':cur==='EUR'?'🇪🇺':cur==='CNY'?'🇨🇳':cur==='AED'?'🇦🇪':''"></span>
+              </div>
+              <span class="text-white font-bold" x-text="rate + ' ₽'"></span>
+            </div>
+          </template>
+        </div>
+        <div class="text-[10px] text-[#3d6b52] mt-3 text-right">Обновляется каждые 5 минут · добавляется к каждому посту при публикации</div>
+      </div>
+
+    </div><!-- /settings -->
 
   </main>
 </div>
@@ -690,65 +719,71 @@ function app() {
     tab: 'panel',
 
     navItems: [
-      { id: 'panel',    icon: '🎛',  label: 'Панель'    },
-      { id: 'calendar', icon: '📅',  label: 'Календарь' },
-      { id: 'history',  icon: '📊',  label: 'История'   },
-      { id: 'drafts',   icon: '📝',  label: 'Черновики' },
+      { id: 'panel',    icon: '🎛',  label: 'Создать пост' },
+      { id: 'calendar', icon: '📅',  label: 'Календарь'    },
+      { id: 'history',  icon: '📊',  label: 'История'      },
     ],
 
-    presets: [
-      'Как платить за товары из Китая',
-      'Работа с санкционными товарами',
-      'Выкуп валютной выручки с бонусом 1–3%',
-      'Возврат НДС из Китая до 40%',
-      'Платежи через Alipay и WeChat',
-      'Рубли утром — платёж вечером',
-      '40+ компаний-плательщиков по всему миру',
-      'Работа с наличными в ВЭД',
-      'Тарифы на импортные платежи',
-      'Как вернуть экспортную выручку в Россию',
-      'Кейс клиента: нестандартная схема',
-      'FAQ: как работает ВЭД-платёж через Seven-X',
+    formats: [
+      { id: 'promo',      icon: '⚡', label: 'Промо'      },
+      { id: 'article',    icon: '📰', label: 'Статья'     },
+      { id: 'poll',       icon: '❓', label: 'Опрос'      },
+      { id: 'story',      icon: '📖', label: 'История'    },
+      { id: 'engagement', icon: '💡', label: 'Вовлечение' },
     ],
 
-    styles: [
-      { id: 'expert', icon: '🎓', label: 'Экспертный' },
-      { id: 'casual', icon: '💬', label: 'Живой'      },
-      { id: 'case',   icon: '📖', label: 'Кейс'       },
-      { id: 'faq',    icon: '❓', label: 'FAQ'         },
+    allTopics: [
+      'Как платить за товары из Китая', 'Работа с санкционными товарами',
+      'Выкуп валютной выручки с бонусом 1–3%', 'Возврат НДС из Китая до 40%',
+      'Платежи через Alipay и WeChat', 'Рубли утром — платёж вечером',
+      'Платежи через Дубай для российского бизнеса', 'Хавала — как работает без банков',
+      'Дирхам ОАЭ и ВЭД-платежи', 'Вторичные санкции и как они работают',
+      'Возврат экспортной выручки в Россию', 'Юань или доллар для импорта из Китая',
+      'Топ-5 ошибок при первом импорте', 'FAQ: чем Seven-X отличается от банка',
     ],
 
     gen: {
-      topic: '', style: 'expert', postFormat: 'promo', includeRates: false,
+      topic: '', style: 'expert', postFormat: 'article', includeRates: false,
       loading: false, imgLoading: null, publishing: false,
       variants: [], selected: null, editing: null, scheduleAt: '',
     },
 
+    // Calendar post edit modal state
+    calEditModal: false,
+    calEditPost: null,
+    calEditText: '',
+    calEditHashtags: '',
+    calEditImageUrl: '',
+    calEditRebuildPrompt: '',
+    calEditSaving: false,
+    calEditRebuilding: false,
+    calEditImgLoading: false,
+
     currency: {},
     settings: {},
     storageType: '',
-    queuePosts: [], histPosts: [], draftPosts: [],
+    histPosts: [],
     queueCount: 0,
     histFilter: 'all',
     get filteredHist() {
-      let posts;
       if (this.histFilter === 'all') {
         const scheduled = this.histPosts.filter(p => p.status === 'scheduled')
           .sort((a,b) => (a.scheduled_at||'').localeCompare(b.scheduled_at||''));
         const rest = this.histPosts.filter(p => p.status !== 'scheduled');
-        posts = [...scheduled, ...rest];
-      } else {
-        posts = this.histPosts.filter(p => p.status === this.histFilter);
-        if (this.histFilter === 'scheduled')
-          posts = posts.sort((a,b) => (a.scheduled_at||'').localeCompare(b.scheduled_at||''));
+        return [...scheduled, ...rest];
       }
+      let posts = this.histPosts.filter(p => p.status === this.histFilter);
+      if (this.histFilter === 'scheduled')
+        posts = posts.sort((a,b) => (a.scheduled_at||'').localeCompare(b.scheduled_at||''));
       return posts;
     },
 
     calMonth: new Date(),
     calDays: [],
     calData: {},
-    calDay: null,
+    calPolling: false,
+    _calPollTimer: null,
+    _calPollCount: 0,
 
     sf: {
       openai_api_key: '', telegram_bot_token: '',
@@ -757,108 +792,103 @@ function app() {
       pexels_api_key: '',
       auto_post_enabled: 'false', auto_generate_enabled: 'false',
       brand_voice: '', contact_info: '',
-      saving: false, autopilotLoading: false, weekLoading: false,
+      add_rates_to_posts: 'true',
+      saving: false, weekLoading: false,
     },
 
-    envVars: [
-      { name: 'OPENAI_API_KEY',      set: false },
-      { name: 'PEXELS_API_KEY',      set: false },
-      { name: 'TELEGRAM_BOT_TOKEN',  set: false },
-      { name: 'CHANNEL_1_ID',        set: false },
-      { name: 'CHANNEL_2_ID',        set: false },
-      { name: 'AI_BASE_URL',         set: false },
-      { name: 'AI_MODEL',            set: false },
-      { name: 'CONTACT_INFO',        set: false },
-    ],
     autoTimes: ['10:00', '19:00'],
-
     toast: { show: false, msg: '', type: 'success' },
     _toastTimer: null,
+    authToken: '',
+    authModal: false,
+    authPassword: '',
+    authError: '',
 
-    // ── Init ────────────────────────────────────────────────────────────────
+    // ── Init ─────────────────────────────────────────────────────────────────
     async init() {
+      this.authToken = sessionStorage.getItem('authToken') || '';
       await Promise.all([this.loadCurrency(), this.loadSettings(), this.loadStorageType()]);
       this.loadQueue();
+      // Refresh currency every 5 minutes
+      setInterval(() => this.loadCurrency(), 5 * 60 * 1000);
     },
 
     async loadStorageType() {
       try {
-        const r = await fetch('/api/storage-type');
+        const r = await this.authFetch('/api/storage-type');
         const d = await r.json();
         this.storageType = d.type || '';
       } catch(e) {}
     },
 
-    // ── Settings ────────────────────────────────────────────────────────────
+    randomTopic() {
+      return this.allTopics[Math.floor(Math.random() * this.allTopics.length)];
+    },
+
+    // ── Settings ──────────────────────────────────────────────────────────────
     async loadSettings() {
       try {
-        const r = await fetch('/api/settings');
+        const r = await this.authFetch('/api/settings');
         this.settings = await r.json();
-        this.sf.channel_1_id = this.settings.channel_1_id || '';
-        this.sf.channel_2_id = this.settings.channel_2_id || '';
-        this.sf.ai_base_url = this.settings.ai_base_url || '';
-        this.sf.ai_model = this.settings.ai_model || '';
-        this.sf.image_provider = this.settings.image_provider || 'pollinations';
-        this.sf.pexels_api_key = this.settings.pexels_api_key || '';
-        this.sf.auto_post_enabled = this.settings.auto_post_enabled || 'false';
-        this.sf.auto_generate_enabled = this.settings.auto_generate_enabled || 'false';
-        this.sf.brand_voice = this.settings.brand_voice || '';
-        this.sf.contact_info = this.settings.contact_info || '';
-        try { this.autoTimes = JSON.parse(this.settings.auto_post_times || '["10:00","19:00"]'); } catch(e) {}
-
         const s = this.settings;
-        const envMap = {
-          'OPENAI_API_KEY':     s.openai_api_key_masked?.includes('(env)'),
-          'PEXELS_API_KEY':     s.pexels_api_key_masked?.includes('(env)'),
-          'TELEGRAM_BOT_TOKEN': s.telegram_bot_token_masked?.includes('(env)'),
-          'CHANNEL_1_ID':       !!(s.channel_1_id),
-          'CHANNEL_2_ID':       !!(s.channel_2_id),
-          'AI_BASE_URL':        !!(s.ai_base_url),
-          'AI_MODEL':           !!(s.ai_model),
-          'CONTACT_INFO':       !!(s.contact_info),
-        };
-        this.envVars = this.envVars.map(ev => ({ ...ev, set: !!envMap[ev.name] }));
+        this.sf.channel_1_id      = s.channel_1_id || '';
+        this.sf.channel_2_id      = s.channel_2_id || '';
+        this.sf.ai_base_url       = s.ai_base_url || '';
+        this.sf.ai_model          = s.ai_model || '';
+        this.sf.image_provider    = s.image_provider || 'pollinations';
+        this.sf.pexels_api_key    = s.pexels_api_key || '';
+        this.sf.auto_post_enabled = s.auto_post_enabled || 'false';
+        this.sf.auto_generate_enabled = s.auto_generate_enabled || 'false';
+        this.sf.brand_voice       = s.brand_voice || '';
+        this.sf.contact_info      = s.contact_info || '';
+        this.sf.add_rates_to_posts = s.add_rates_to_posts || 'true';
+        try { this.autoTimes = JSON.parse(s.auto_post_times || '["10:00","19:00"]'); } catch(e) {}
       } catch(e) {}
     },
 
     setProvider(name) {
       const presets = {
-        openai: { url: '', model: '' },
-        groq: { url: 'https://api.groq.com/openai/v1', model: 'llama-3.3-70b-versatile' },
-        deepseek: { url: 'https://api.deepseek.com', model: 'deepseek-chat' },
+        openai:    { url: '',                              model: '' },
+        groq:      { url: 'https://api.groq.com/openai/v1', model: 'llama-3.3-70b-versatile' },
+        deepseek:  { url: 'https://api.deepseek.com',       model: 'deepseek-chat' },
       };
       const p = presets[name] || presets.openai;
       this.sf.ai_base_url = p.url;
-      this.sf.ai_model = p.model;
+      this.sf.ai_model    = p.model;
     },
 
     async saveSettings() {
       this.sf.saving = true;
       try {
         const body = {
-          channel_1_id: this.sf.channel_1_id,
-          channel_2_id: this.sf.channel_2_id,
-          ai_base_url: this.sf.ai_base_url,
-          ai_model: this.sf.ai_model,
-          image_provider: this.sf.image_provider,
-          auto_post_enabled: this.sf.auto_post_enabled,
-          auto_post_times: JSON.stringify(this.autoTimes),
-          auto_generate_enabled: this.sf.auto_generate_enabled,
-          brand_voice: this.sf.brand_voice,
-          contact_info: this.sf.contact_info,
+          channel_1_id:           this.sf.channel_1_id,
+          channel_2_id:           this.sf.channel_2_id,
+          ai_base_url:            this.sf.ai_base_url,
+          ai_model:               this.sf.ai_model,
+          image_provider:         this.sf.image_provider,
+          auto_post_enabled:      this.sf.auto_post_enabled,
+          auto_post_times:        JSON.stringify(this.autoTimes),
+          auto_generate_enabled:  this.sf.auto_generate_enabled,
+          brand_voice:            this.sf.brand_voice,
+          contact_info:           this.sf.contact_info,
+          add_rates_to_posts:     this.sf.add_rates_to_posts,
         };
-        if (this.sf.openai_api_key) body.openai_api_key = this.sf.openai_api_key;
-        if (this.sf.telegram_bot_token) body.telegram_bot_token = this.sf.telegram_bot_token;
-        if (this.sf.pexels_api_key) body.pexels_api_key = this.sf.pexels_api_key;
-        const r = await fetch('/api/settings', {
+        if (this.sf.openai_api_key)      body.openai_api_key      = this.sf.openai_api_key;
+        if (this.sf.telegram_bot_token)  body.telegram_bot_token  = this.sf.telegram_bot_token;
+        if (this.sf.pexels_api_key)      body.pexels_api_key      = this.sf.pexels_api_key;
+        const r = await this.authFetch('/api/settings', {
           method: 'PUT', headers: {'Content-Type':'application/json'},
           body: JSON.stringify(body),
         });
-        if (!r.ok) { const e = await r.json(); this.notify('Ошибка: '+(e.detail||JSON.stringify(e)), 'error'); return; }
+        if (!r.ok) {
+          const e = await r.json();
+          this.notify('Ошибка: ' + (e.detail || JSON.stringify(e)), 'error');
+          return;
+        }
         this.notify('✅ Настройки сохранены');
         await this.loadSettings();
       } catch(e) {
-        this.notify('Ошибка соединения: '+e.message, 'error');
+        this.notify('Ошибка соединения: ' + e.message, 'error');
       } finally {
         this.sf.saving = false;
       }
@@ -866,124 +896,162 @@ function app() {
 
     async testTg() {
       try {
-        const token = this.sf.telegram_bot_token || this.settings.telegram_bot_token_masked;
-        if (!token) { this.notify('Введите токен бота', 'error'); return; }
-        const r = await fetch('/api/test-telegram', { method: 'POST' });
+        const r = await this.authFetch('/api/test-telegram', { method: 'POST' });
         const d = await r.json();
-        if (d.success) this.notify('✅ Бот @'+d.bot_name+' подключён!');
-        else this.notify('❌ Ошибка: '+d.error, 'error');
+        if (r.ok && d.success) this.notify('✅ Бот @' + d.bot_name + ' подключён!');
+        else this.notify('❌ Ошибка: ' + (d.error || d.detail || 'Unknown'), 'error');
       } catch(e) { this.notify('❌ Ошибка соединения', 'error'); }
     },
 
-    async triggerAutopilot() {
-      this.sf.autopilotLoading = true;
+    async loadDefaultBrandVoice() {
       try {
-        const r = await fetch('/api/autopilot/trigger', { method: 'POST' });
+        const r = await this.authFetch('/api/default-brand-voice');
         const d = await r.json();
-        if (d.success) {
-          this.notify('✅ Автопилот сработал! Пост опубликован.');
-        } else {
-          this.notify('❌ ' + (d.error || 'Ошибка автопилота'), 'error');
+        if (d.brand_voice) {
+          this.sf.brand_voice = d.brand_voice;
+          this.notify('Стандартный промпт загружен');
         }
-      } catch(e) { this.notify('❌ Ошибка соединения', 'error'); }
-      finally { this.sf.autopilotLoading = false; }
+      } catch(e) { this.notify('Ошибка загрузки', 'error'); }
     },
 
-    async generateWeek() {
-      this.sf.weekLoading = true;
+    async bulkDelete(status) {
+      const label = status === 'failed' ? 'все посты с ошибкой' : 'все черновики';
+      if (!confirm(`Удалить ${label}?`)) return;
       try {
-        const r = await fetch('/api/autopilot/generate-week', { method: 'POST' });
+        const r = await this.authFetch(`/api/posts/bulk?status=${status}`, { method: 'DELETE' });
         const d = await r.json();
         if (r.ok) {
-          this.notify('📅 ' + d.message);
+          this.notify(`Удалено: ${d.deleted} постов`);
+          await this.loadHist();
+          await this.loadQueue();
         } else {
-          this.notify('❌ ' + (d.detail || 'Ошибка'), 'error');
+          this.notify('❌ Ошибка удаления', 'error');
         }
       } catch(e) { this.notify('❌ Ошибка соединения', 'error'); }
-      finally { this.sf.weekLoading = false; }
+    },
+
+    async _quickSave(patch) {
+      try {
+        await this.authFetch('/api/settings', {
+          method: 'PUT', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(patch),
+        });
+      } catch(e) {}
     },
 
     // ── Tab switch ───────────────────────────────────────────────────────────
     async switchTab(id) {
       this.tab = id;
-      if (id === 'calendar') { await this.loadCal(); }
-      if (id === 'queue')    { await this.loadQueue(); }
-      if (id === 'history')  { await this.loadHist(); }
-      if (id === 'drafts')   { await this.loadDrafts(); }
+      if (id === 'calendar') await this.loadCal();
+      if (id === 'history')  await this.loadHist();
     },
 
-    // ── Toast ────────────────────────────────────────────────────────────────
-    notify(msg, type='success') {
+    // ── Toast ─────────────────────────────────────────────────────────────────
+    notify(msg, type = 'success') {
       clearTimeout(this._toastTimer);
       this.toast = { show: true, msg, type };
-      this._toastTimer = setTimeout(() => this.toast.show = false, 4000);
+      this._toastTimer = setTimeout(() => this.toast.show = false, 4500);
     },
 
-    // ── Currency ─────────────────────────────────────────────────────────────
+    // ── Auth ──────────────────────────────────────────────────────────────────
+    async authFetch(url, opts = {}) {
+      opts.headers = Object.assign({}, opts.headers);
+      if (this.authToken) opts.headers['Authorization'] = 'Bearer ' + this.authToken;
+      const r = await window.fetch(url, opts);
+      if (r.status === 401) {
+        this.authToken = '';
+        sessionStorage.removeItem('authToken');
+        this.authModal = true;
+      }
+      return r;
+    },
+
+    async submitAuth() {
+      this.authError = '';
+      const token = this.authPassword;
+      const r = await window.fetch('/api/settings', { headers: { 'Authorization': 'Bearer ' + token } });
+      if (r.status === 401) { this.authError = 'Неверный пароль'; return; }
+      this.authToken = token;
+      sessionStorage.setItem('authToken', token);
+      this.authModal = false;
+      this.authPassword = '';
+      await Promise.all([this.loadCurrency(), this.loadSettings(), this.loadStorageType()]);
+      this.loadQueue();
+    },
+
+    // ── Currency ──────────────────────────────────────────────────────────────
     async loadCurrency() {
       try {
-        const r = await fetch('/api/currency');
+        const r = await this.authFetch('/api/currency');
         this.currency = await r.json();
       } catch(e) {}
     },
 
-    // ── Generator ────────────────────────────────────────────────────────────
+    // ── Generator ─────────────────────────────────────────────────────────────
     async generate() {
-      if (!this.gen.topic || this.gen.loading) return;
+      if (this.gen.loading) return;
       this.gen.loading = true;
       this.gen.variants = [];
       this.gen.selected = null;
       this.gen.editing = null;
+      const topic = this.gen.topic || this.randomTopic();
       try {
-        const r = await fetch('/api/generate', {
+        const r = await this.authFetch('/api/generate', {
           method: 'POST', headers: {'Content-Type':'application/json'},
           body: JSON.stringify({
-            topic: this.gen.topic,
-            style: this.gen.style,
-            post_format: this.gen.postFormat,
-            include_rates: this.gen.includeRates,
-            brand_voice: this.sf.brand_voice || null,
+            topic,
+            style:        this.gen.style,
+            post_format:  this.gen.postFormat,
+            include_rates: false,
+            brand_voice:  this.sf.brand_voice || null,
           })
         });
-        if (!r.ok) { const e = await r.json(); this.notify(e.detail||'Ошибка генерации', 'error'); return; }
+        if (!r.ok) {
+          const e = await r.json();
+          this.notify(e.detail || 'Ошибка генерации', 'error');
+          return;
+        }
         const d = await r.json();
-        this.gen.variants = d.variants.map(v => ({...v, image_url: ''}));
-        if (!this.gen.variants.length) { this.notify('AI не вернул варианты', 'error'); }
-      } catch(e) { this.notify('Ошибка соединения: '+e.message, 'error'); }
-      finally { this.gen.loading = false; }
+        this.gen.variants = (d.variants || []).map(v => ({...v, image_url: ''}));
+        if (!this.gen.variants.length) this.notify('AI не вернул варианты', 'error');
+      } catch(e) {
+        this.notify('Ошибка соединения: ' + e.message, 'error');
+      } finally {
+        this.gen.loading = false;
+      }
     },
 
     async generateImage(i) {
       if (!this.gen.variants[i]) return;
       this.gen.imgLoading = i;
       try {
-        const r = await fetch('/api/generate/image', {
+        const r = await this.authFetch('/api/generate/image', {
           method: 'POST', headers: {'Content-Type':'application/json'},
           body: JSON.stringify({
-            topic: this.gen.topic,
-            post_text: this.gen.variants[i].text,
+            topic:      this.gen.topic || this.randomTopic(),
+            post_text:  this.gen.variants[i].text,
             image_hook: this.gen.variants[i].image_hook || '',
           })
         });
-        if (!r.ok) { const e = await r.json(); this.notify(e.detail||'Ошибка картинки', 'error'); return; }
+        if (!r.ok) { const e = await r.json(); this.notify(e.detail || 'Ошибка картинки', 'error'); return; }
         const d = await r.json();
         this.gen.variants[i].image_url = d.image_url;
       } catch(e) { this.notify('Ошибка соединения', 'error'); }
       finally { this.gen.imgLoading = null; }
     },
 
-    async _createPost(status, scheduled_at=null) {
+    async _createPost(status, scheduled_at = null) {
       const v = this.gen.variants[this.gen.selected];
       try {
-        const r = await fetch('/api/posts', {
+        const r = await this.authFetch('/api/posts', {
           method: 'POST', headers: {'Content-Type':'application/json'},
           body: JSON.stringify({
-            topic: this.gen.topic,
-            text: v.text,
-            image_path: v.image_url || '',
-            style: this.gen.style,
-            post_format: this.gen.postFormat,
-            hashtags: v.hashtags || '',
+            topic:        this.gen.topic || '',
+            text:         v.text,
+            image_path:   v.image_url || '',
+            style:        this.gen.style,
+            post_format:  this.gen.postFormat,
+            hashtags:     v.hashtags || '',
             status,
             scheduled_at,
           })
@@ -1002,13 +1070,14 @@ function app() {
       try {
         const id = await this._createPost('draft');
         if (!id) return;
-        const r = await fetch(`/api/posts/${id}/publish`, { method: 'POST' });
+        const r = await this.authFetch(`/api/posts/${id}/publish`, { method: 'POST' });
         const d = await r.json();
         if (d.success) {
           this.notify('✅ Пост опубликован!');
           this.gen.variants = []; this.gen.selected = null; this.gen.topic = '';
+          await this.loadQueue();
         } else {
-          this.notify('❌ Ошибка: ' + (d.error || d.status || 'неизвестная'), 'error');
+          this.notify('❌ Ошибка: ' + (d.error || d.detail || d.status || 'неизвестная'), 'error');
         }
       } catch(e) { this.notify('❌ Ошибка: ' + e.message, 'error'); }
       finally { this.gen.publishing = false; }
@@ -1022,98 +1091,115 @@ function app() {
       try {
         const id = await this._createPost('draft');
         if (!id) return;
-        const r = await fetch(`/api/posts/${id}/schedule`, {
+        const r = await this.authFetch(`/api/posts/${id}/schedule`, {
           method: 'POST', headers: {'Content-Type':'application/json'},
           body: JSON.stringify({ scheduled_at: this.gen.scheduleAt })
         });
         if (r.ok) {
           this.notify('🗓 Пост запланирован!');
-          this.queueCount++;
           this.gen.variants = []; this.gen.selected = null;
           this.gen.topic = ''; this.gen.scheduleAt = '';
+          await this.loadQueue();
         } else {
-          this.notify('❌ Ошибка планирования', 'error');
+          const e = await r.json();
+          this.notify('❌ Ошибка: ' + (e.detail || 'неизвестная'), 'error');
         }
       } catch(e) { this.notify('❌ Ошибка: ' + e.message, 'error'); }
     },
 
-    async saveDraft() {
-      if (this.gen.selected === null) return;
-      const id = await this._createPost('draft');
-      if (id) this.notify('💾 Черновик сохранён');
+    // ── Week Generation ────────────────────────────────────────────────────────
+    async generateWeek() {
+      this.sf.weekLoading = true;
+      try {
+        await this._quickSave({ auto_post_times: JSON.stringify(this.autoTimes) });
+        const r = await this.authFetch('/api/autopilot/generate-week', { method: 'POST' });
+        const d = await r.json();
+        if (r.ok) {
+          this.notify('📅 ' + d.message);
+          if (this.tab === 'calendar') {
+            this._startCalPoll();
+          }
+        } else {
+          this.notify('❌ ' + (d.detail || 'Ошибка'), 'error');
+        }
+      } catch(e) { this.notify('❌ Ошибка соединения', 'error'); }
+      finally { this.sf.weekLoading = false; }
     },
 
-    // ── Queue / Drafts ───────────────────────────────────────────────────────
+    _startCalPoll() {
+      this._calPollCount = 0;
+      this.calPolling = true;
+      clearInterval(this._calPollTimer);
+      this._calPollTimer = setInterval(async () => {
+        await this.loadCal();
+        this._calPollCount++;
+        if (this._calPollCount >= 15) {
+          clearInterval(this._calPollTimer);
+          this.calPolling = false;
+        }
+      }, 8000);
+    },
+
+    // ── Queue ─────────────────────────────────────────────────────────────────
     async loadQueue() {
       try {
-        const r = await fetch('/api/posts?status=scheduled');
+        const r = await this.authFetch('/api/posts?status=scheduled');
         const d = await r.json();
-        this.queuePosts = d.posts;
-        this.queueCount = d.posts.length;
+        this.queueCount = (d.posts || []).length;
       } catch(e) {}
     },
 
+    // ── History ────────────────────────────────────────────────────────────────
     async loadHist() {
       try {
-        const r = await fetch('/api/posts?status=scheduled,published,failed');
+        const r = await this.authFetch('/api/posts?status=scheduled,published,failed,draft');
         const data = await r.json();
-        // scheduled sorted by scheduled_at asc, rest by published_at/created_at desc
-        const scheduled = (data.posts||[]).filter(p=>p.status==='scheduled')
-          .sort((a,b)=>(a.scheduled_at||'').localeCompare(b.scheduled_at||''));
-        const rest = (data.posts||[]).filter(p=>p.status!=='scheduled')
-          .sort((a,b)=>(b.published_at||b.created_at||'').localeCompare(a.published_at||a.created_at||''));
+        const scheduled = (data.posts||[]).filter(p => p.status === 'scheduled')
+          .sort((a,b) => (a.scheduled_at||'').localeCompare(b.scheduled_at||''));
+        const rest = (data.posts||[]).filter(p => p.status !== 'scheduled')
+          .sort((a,b) => (b.published_at||b.created_at||'').localeCompare(a.published_at||a.created_at||''));
         this.histPosts = [...scheduled, ...rest];
       } catch(e) {}
     },
 
-    async loadDrafts() {
+    async pubPost(id) {
       try {
-        const r = await fetch('/api/posts?status=draft');
-        this.draftPosts = (await r.json()).posts;
-      } catch(e) {}
-    },
-
-    async pubPost(id, list) {
-      try {
-        const r = await fetch(`/api/posts/${id}/publish`, { method: 'POST' });
+        const r = await this.authFetch(`/api/posts/${id}/publish`, { method: 'POST' });
         const d = await r.json();
         if (d.success) { this.notify('✅ Опубликовано!'); }
-        else { this.notify('❌ Ошибка: '+(d.error || d.status), 'error'); }
+        else { this.notify('❌ Ошибка: ' + (d.error || d.detail || d.status), 'error'); }
       } catch(e) { this.notify('❌ Ошибка соединения', 'error'); }
-      if (list==='drafts') await this.loadDrafts();
-      if (list==='history') await this.loadHist();
+      await this.loadHist();
+      await this.loadQueue();
     },
 
-    async delPost(id, list) {
+    async delPost(id) {
       if (!confirm('Удалить пост?')) return;
       try {
-        await fetch(`/api/posts/${id}`, { method: 'DELETE' });
+        await this.authFetch(`/api/posts/${id}`, { method: 'DELETE' });
         this.notify('Удалено');
       } catch(e) { this.notify('❌ Ошибка соединения', 'error'); }
-      if (list==='queue') await this.loadQueue();
-      if (list==='drafts') await this.loadDrafts();
-      if (list==='history') await this.loadHist();
+      await this.loadHist();
+      await this.loadQueue();
     },
 
-    // ── Calendar ─────────────────────────────────────────────────────────────
+    // ── Calendar ───────────────────────────────────────────────────────────────
     get calMonthName() {
       const M = ['Январь','Февраль','Март','Апрель','Май','Июнь',
                  'Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
       return M[this.calMonth.getMonth()] + ' ' + this.calMonth.getFullYear();
     },
     prevMonth() {
-      this.calDay = null;
       this.calMonth = new Date(this.calMonth.getFullYear(), this.calMonth.getMonth()-1, 1);
       this.buildCal();
     },
     nextMonth() {
-      this.calDay = null;
       this.calMonth = new Date(this.calMonth.getFullYear(), this.calMonth.getMonth()+1, 1);
       this.buildCal();
     },
     async loadCal() {
       try {
-        const r = await fetch('/api/calendar');
+        const r = await this.authFetch('/api/calendar');
         this.calData = await r.json();
         this.buildCal();
       } catch(e) {}
@@ -1124,12 +1210,11 @@ function app() {
       const today = new Date();
       let first = new Date(Y, M, 1).getDay();
       first = first === 0 ? 6 : first - 1;
-      const dim = new Date(Y, M+1, 0).getDate();
+      const dim  = new Date(Y, M+1, 0).getDate();
       const pDim = new Date(Y, M, 0).getDate();
       const days = [];
-      for (let i = first-1; i >= 0; i--) {
+      for (let i = first-1; i >= 0; i--)
         days.push({ d: pDim-i, cur: false, today: false, posts: [] });
-      }
       for (let d = 1; d <= dim; d++) {
         const ds = `${Y}-${String(M+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
         const isToday = today.getFullYear()===Y && today.getMonth()===M && today.getDate()===d;
@@ -1138,13 +1223,137 @@ function app() {
           posts: this.calData[ds] || [] });
       }
       const rem = 42 - days.length;
-      for (let d = 1; d <= rem; d++) {
+      for (let d = 1; d <= rem; d++)
         days.push({ d, cur: false, today: false, posts: [] });
-      }
       this.calDays = days;
     },
 
-    // ── Helpers ──────────────────────────────────────────────────────────────
+    // ── Calendar Post Edit Modal ───────────────────────────────────────────────
+    async openCalPostEdit(postId) {
+      try {
+        const r = await this.authFetch(`/api/posts/${postId}`);
+        if (!r.ok) { this.notify('Не удалось загрузить пост', 'error'); return; }
+        const post = await r.json();
+        this.calEditPost       = post;
+        this.calEditText       = post.text || '';
+        this.calEditHashtags   = post.hashtags || '';
+        this.calEditImageUrl   = post.image_path || '';
+        this.calEditRebuildPrompt = '';
+        this.calEditModal      = true;
+      } catch(e) { this.notify('Ошибка загрузки поста', 'error'); }
+    },
+
+    async saveCalEdit() {
+      if (!this.calEditPost) return;
+      this.calEditSaving = true;
+      try {
+        const r = await this.authFetch(`/api/posts/${this.calEditPost.id}`, {
+          method: 'PUT',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            topic:        this.calEditPost.topic || '',
+            text:         this.calEditText,
+            image_path:   this.calEditImageUrl,
+            style:        this.calEditPost.style || '',
+            post_format:  this.calEditPost.format || 'article',
+            hashtags:     this.calEditHashtags,
+            status:       this.calEditPost.status,
+            scheduled_at: this.calEditPost.scheduled_at || null,
+          })
+        });
+        if (r.ok) {
+          this.notify('✅ Пост обновлён');
+          this.calEditModal = false;
+          await this.loadCal();
+          await this.loadQueue();
+        } else {
+          this.notify('❌ Ошибка сохранения', 'error');
+        }
+      } catch(e) { this.notify('❌ Ошибка: ' + e.message, 'error'); }
+      finally { this.calEditSaving = false; }
+    },
+
+    async pubCalPost() {
+      if (!this.calEditPost) return;
+      // Save edits first, then publish
+      await this.saveCalEdit();
+      if (!this.calEditModal) {
+        // Modal closed = save succeeded, now publish
+        await this.pubPost(this.calEditPost.id);
+      }
+    },
+
+    async deleteCalPost() {
+      if (!this.calEditPost) return;
+      if (!confirm('Удалить этот пост?')) return;
+      try {
+        await this.authFetch(`/api/posts/${this.calEditPost.id}`, { method: 'DELETE' });
+        this.notify('Удалено');
+        this.calEditModal = false;
+        await this.loadCal();
+        await this.loadQueue();
+      } catch(e) { this.notify('❌ Ошибка', 'error'); }
+    },
+
+    async rebuildCalText() {
+      if (!this.calEditPost) return;
+      this.calEditRebuilding = true;
+      try {
+        const topic = this.calEditPost.topic ||
+          (this.calEditRebuildPrompt ? this.calEditRebuildPrompt : 'ВЭД платежи Seven-X');
+        const extraPrompt = this.calEditRebuildPrompt
+          ? '\n\nДополнительное требование: ' + this.calEditRebuildPrompt
+          : '';
+        const r = await this.authFetch('/api/generate', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            topic: topic + (this.calEditRebuildPrompt ? '. ' + this.calEditRebuildPrompt : ''),
+            style:       this.calEditPost.style || 'expert',
+            post_format: this.calEditPost.format || 'article',
+            include_rates: false,
+            brand_voice: (this.sf.brand_voice || '') + extraPrompt,
+          })
+        });
+        if (r.ok) {
+          const d = await r.json();
+          if (d.variants && d.variants.length > 0) {
+            this.calEditText     = d.variants[0].text;
+            this.calEditHashtags = d.variants[0].hashtags || this.calEditHashtags;
+            this.notify('✅ Текст пересобран AI');
+          }
+        } else {
+          this.notify('❌ Ошибка генерации', 'error');
+        }
+      } catch(e) { this.notify('❌ Ошибка: ' + e.message, 'error'); }
+      finally { this.calEditRebuilding = false; }
+    },
+
+    async regenCalImage() {
+      if (!this.calEditPost) return;
+      this.calEditImgLoading = true;
+      try {
+        const r = await this.authFetch('/api/generate/image', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            topic:      this.calEditPost.topic || 'ВЭД платежи Seven-X',
+            post_text:  this.calEditText,
+            image_hook: '',
+          })
+        });
+        if (r.ok) {
+          const d = await r.json();
+          this.calEditImageUrl = d.image_url;
+          this.notify('✅ Картинка обновлена');
+        } else {
+          this.notify('❌ Ошибка генерации картинки', 'error');
+        }
+      } catch(e) { this.notify('❌ Ошибка: ' + e.message, 'error'); }
+      finally { this.calEditImgLoading = false; }
+    },
+
+    // ── Helpers ────────────────────────────────────────────────────────────────
     fmtDate(s) {
       if (!s) return '';
       try {
@@ -1153,6 +1362,17 @@ function app() {
           hour:'2-digit', minute:'2-digit'
         });
       } catch(e) { return s; }
+    },
+
+    fmtBadge(format) {
+      const m = {
+        article:    '📰 Статья',
+        promo:      '⚡ Промо',
+        poll:       '❓ Опрос',
+        story:      '📖 История',
+        engagement: '💡 Вовлечение',
+      };
+      return m[format] || format || '';
     },
   }
 }

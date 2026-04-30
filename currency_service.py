@@ -14,29 +14,44 @@ _CACHE_TTL = 300  # 5 minutes
 _cache: dict = {"data": None, "expires": 0.0}
 
 
+async def _fetch_rates() -> dict:
+    """Fetch fresh rates from CBR, no caching."""
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.get(CBR_URL)
+        resp.raise_for_status()
+
+    root = ET.fromstring(resp.text)
+    # Use the date from the XML itself, not server clock
+    xml_date = root.get("Date", datetime.now().strftime("%d.%m.%Y"))
+    rates = {}
+
+    for valute in root.findall("Valute"):
+        code = valute.find("CharCode").text
+        if code in TRACKED:
+            nominal = int(valute.find("Nominal").text)
+            value = float(valute.find("Value").text.replace(",", ".")) / nominal
+            rates[code] = round(value, 2)
+
+    return {"rates": rates, "date": xml_date, "source": "ЦБ РФ"}
+
+
+async def refresh_rates() -> None:
+    """Force-refresh rates and update cache. Called by scheduler every 5 minutes."""
+    global _cache
+    try:
+        result = await _fetch_rates()
+        _cache["data"] = result
+        _cache["expires"] = time.monotonic() + _CACHE_TTL
+        logger.debug(f"Currency rates refreshed: {result['date']}")
+    except Exception as e:
+        logger.error(f"Currency refresh error: {e}")
+
+
 async def get_cbr_rates() -> dict:
     if _cache["data"] and time.monotonic() < _cache["expires"]:
         return _cache["data"]
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.get(CBR_URL)
-            resp.raise_for_status()
-
-        root = ET.fromstring(resp.text)
-        rates = {}
-
-        for valute in root.findall("Valute"):
-            code = valute.find("CharCode").text
-            if code in TRACKED:
-                nominal = int(valute.find("Nominal").text)
-                value = float(valute.find("Value").text.replace(",", ".")) / nominal
-                rates[code] = round(value, 2)
-
-        result = {
-            "rates": rates,
-            "date": datetime.now().strftime("%d.%m.%Y"),
-            "source": "ЦБ РФ",
-        }
+        result = await _fetch_rates()
         _cache["data"] = result
         _cache["expires"] = time.monotonic() + _CACHE_TTL
         return result
@@ -51,14 +66,19 @@ def format_rates_for_post(data: dict) -> str:
     if not data.get("rates"):
         return ""
     lines = [f"💱 Курсы ЦБ РФ на {data['date']}:"]
-    for currency, rate in data["rates"].items():
-        flag = FLAGS.get(currency, "")
-        lines.append(f"{flag} {currency}: {rate} ₽")
+    for currency in ("USD", "EUR", "CNY", "AED"):
+        rate = data["rates"].get(currency)
+        if rate is not None:
+            lines.append(f"{FLAGS.get(currency, '')} {currency}: {rate} ₽")
     return "\n".join(lines)
 
 
 def strip_rates_block(text: str) -> str:
-    """Remove a previously appended CBR rates block so it can be replaced with fresh data."""
+    """Remove all appended CBR rates blocks so they can be replaced with fresh data."""
     marker = "\n\n💱 Курсы ЦБ РФ на"
-    idx = text.find(marker)
-    return text[:idx] if idx != -1 else text
+    while True:
+        idx = text.find(marker)
+        if idx == -1:
+            break
+        text = text[:idx]
+    return text

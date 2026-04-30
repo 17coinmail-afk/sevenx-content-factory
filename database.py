@@ -18,7 +18,7 @@ DEFAULT_BRAND_VOICE = """Ты — контент-менеджер компани
 • Переводы физлиц: Alipay, WeChat, наличные, крипта
 • Скорость: рубли утром → платёжное поручение вечером
 • Менеджер на связи 24/7
-• Контакт: Артём, +7 967 202-55-54, artem@seven-x.ru
+• Контакт менеджера: +7 967 202-55-54, artem@seven-x.ru
 
 Пиши посты для Telegram-канала. Используй эмодзи уместно. Живо, без канцелярита. До 1200 символов."""
 
@@ -132,9 +132,10 @@ def init_db():
             "auto_post_enabled": "false",
             "auto_generate_enabled": "false",
             "auto_post_times": json.dumps(["10:00", "19:00"]),
-            "brand_voice": DEFAULT_BRAND_VOICE,
-            "contact_info": "Артём: +7 967 202-55-54",
+            "brand_voice": "",
+            "contact_info": "+7 967 202-55-54",
             "pexels_api_key": "",
+            "add_rates_to_posts": "true",
         }
 
         for key, value in defaults.items():
@@ -148,6 +149,20 @@ def init_db():
                     "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
                     (key, value),
                 )
+
+        # Migration: upgrade auto_post_times from single-slot to two-slot default
+        cur.execute(_q("SELECT value FROM settings WHERE key = 'auto_post_times'"))
+        row = cur.fetchone()
+        if row:
+            try:
+                times = json.loads(row["value"])
+                if isinstance(times, list) and len(times) == 1:
+                    cur.execute(
+                        _q("UPDATE settings SET value = ? WHERE key = 'auto_post_times'"),
+                        (json.dumps([times[0], "19:00"]),),
+                    )
+            except Exception:
+                pass
 
 
 def get_settings() -> dict:
@@ -196,16 +211,23 @@ def get_post(post_id: int) -> dict | None:
         return dict(r) if r else None
 
 
+_VALID_STATUSES = {"scheduled", "published", "draft", "failed"}
+
+
 def get_posts(status: str = None) -> list[dict]:
     with _cur() as cur:
         if status and "," in status:
-            statuses = [s.strip() for s in status.split(",")]
+            statuses = [s.strip() for s in status.split(",") if s.strip() in _VALID_STATUSES]
+            if not statuses:
+                return []
             placeholders = ",".join("?" * len(statuses))
             cur.execute(
                 _q(f"SELECT * FROM posts WHERE status IN ({placeholders}) ORDER BY created_at DESC"),
                 statuses,
             )
         elif status:
+            if status not in _VALID_STATUSES:
+                return []
             cur.execute(
                 _q("SELECT * FROM posts WHERE status = ? ORDER BY created_at DESC"),
                 (status,),

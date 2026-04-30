@@ -7,9 +7,9 @@ from pathlib import Path
 from contextlib import asynccontextmanager
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
@@ -26,6 +26,9 @@ logger = logging.getLogger(__name__)
 IMAGES_DIR = Path(os.getenv("IMAGES_DIR", "images"))
 IMAGES_DIR.mkdir(exist_ok=True, parents=True)
 Path("static").mkdir(exist_ok=True)
+
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "").strip()
+_week_gen_running = False
 
 # Mapping: settings DB key → environment variable name
 _ENV_MAP = {
@@ -138,21 +141,50 @@ TOPIC_POOL: dict[str, list[str]] = {
         "FAQ: что делать если поставщик отказывается от агентского платежа",
         "Вопрос-ответ: как рассчитывается комиссия агента и от чего она зависит",
     ],
+    "история_вэд": [
+        "Хавала: тысячелетняя система переводов без банков — и почему она работает до сих пор",
+        "Как Никсон убил золотой стандарт в 1971 году — и при чём тут ваши платежи сегодня",
+        "Великий шёлковый путь XXI века: как торговые маршруты Китая выглядят сегодня",
+        "Как ОАЭ за 50 лет превратился из рыбацкой деревни в главный хаб для российского ВЭД",
+        "История дефолта 1998 года: что произошло с импортёрами за одну ночь",
+        "Гонконг vs Шанхай: история двух финансовых столиц Китая — и что это значит для платежей",
+        "Как советские предприниматели решали проблему валюты — методы, которые не устарели",
+        "История торговой блокады: что происходит с цепочками поставок когда страну отрезают от SWIFT",
+    ],
+    "вовлечение": [
+        "Как давно вам последний раз отказал банк в международном переводе?",
+        "Через что вы сейчас проводите платежи в Китай — банк, агент, наличные или крипта?",
+        "Ваш опыт: самая долгая задержка платежа — сколько дней ждали и чем закончилось?",
+        "Знаете ли вы реальную стоимость банковской конвертации — посчитаем вместе",
+        "Банки vs платёжные агенты: кто выживет через 5 лет — что думает аудитория",
+        "Самые абсурдные причины отказа банка в переводе — делитесь в комментариях",
+        "Как вы выбираете платёжного агента — по рекомендации, цене или истории компании?",
+        "Первый платёж в Китай: что пошло не так и чему это вас научило?",
+    ],
+    "интересные_факты": [
+        "5 цифр о международных платежах из России, в которые трудно поверить",
+        "Почему юань — не просто валюта, а политический инструмент Китая",
+        "Как санкции 2022–2025 изменили карту международных платежей навсегда",
+        "Сколько денег теряется на комиссиях при ВЭД ежегодно — считаем в рублях",
+        "Карта запретов 2025: какие страны закрыты для платежей через российские банки",
+        "Почему $1000 долларов в ОАЭ стоит дороже чем $1000 в России — математика ВЭД",
+        "Самые необычные товары которые везут из Китая — и самые сложные случаи оплаты",
+    ],
 }
 
 # Flat list for legacy compatibility, built from pool
 PRESET_TOPICS = [t for topics in TOPIC_POOL.values() for t in topics]
 
 AUTOPILOT_STYLES = ["expert", "casual", "case", "faq"]
-# Alternate promo and article — equal weight so channel gets both punchy and deep content
-AUTOPILOT_FORMATS = ["promo", "article"]
+# 7-slot rotation: 2 articles + 2 promos + 1 engagement + 1 story + 1 poll per cycle
+AUTOPILOT_FORMATS = ["article", "promo", "engagement", "story", "article", "promo", "poll"]
 
 # Category rotation state — tracked across calls via recently published category
 _CATEGORY_ORDER = list(TOPIC_POOL.keys())
 
 
 def _pick_autopilot_topic_and_style() -> tuple[str, str, str]:
-    """Pick topic (category-aware), style, and format not matching recent posts."""
+    """Pick topic (category-aware), style, and format cycling through all 7 types."""
     recent = db.get_posts(status="published")
 
     # Determine which category to use next — avoid last 2 used categories
@@ -178,9 +210,13 @@ def _pick_autopilot_topic_and_style() -> tuple[str, str, str]:
     style_pool = [s for s in AUTOPILOT_STYLES if s != last_style] or AUTOPILOT_STYLES
     style = random.choice(style_pool)
 
-    # Strictly alternate promo/article
+    # Cycle through all formats in order
     last_format = recent[0].get("format", "") if recent else ""
-    post_format = "article" if last_format == "promo" else "promo"
+    try:
+        last_idx = AUTOPILOT_FORMATS.index(last_format)
+        post_format = AUTOPILOT_FORMATS[(last_idx + 1) % len(AUTOPILOT_FORMATS)]
+    except ValueError:
+        post_format = AUTOPILOT_FORMATS[0]
 
     return topic, style, post_format
 
@@ -191,10 +227,22 @@ def _resolve_image_path(image_path: str) -> str:
     if not image_path:
         return ""
     if image_path.startswith("/images/"):
-        return str(IMAGES_DIR / image_path[8:])
+        resolved = (IMAGES_DIR / image_path[8:]).resolve()
+        if not str(resolved).startswith(str(IMAGES_DIR.resolve())):
+            logger.warning(f"Path traversal blocked: {image_path}")
+            return ""
+        return str(resolved)
     if image_path.startswith("/"):
         return image_path[1:]
     return image_path
+
+
+def _safe_times(raw: str) -> list:
+    try:
+        val = json.loads(raw)
+        return val if isinstance(val, list) else ["10:00", "19:00"]
+    except (json.JSONDecodeError, ValueError):
+        return ["10:00", "19:00"]
 
 
 async def publish_post(post_id: int) -> str:
@@ -216,12 +264,37 @@ async def publish_post(post_id: int) -> str:
 
     image_path = _resolve_image_path(post.get("image_path", ""))
 
-    # Always attach current CBR rates at the moment of publishing
+    # Regenerate image if: (a) file was wiped from ephemeral disk, or (b) image generation
+    # failed during autopilot (post saved with empty image_path but has a topic)
+    file_missing = post.get("image_path") and (not image_path or not Path(image_path).exists())
+    no_image_has_topic = not post.get("image_path") and post.get("topic")
+    if file_missing or no_image_has_topic:
+        topic = post.get("topic", "")
+        if topic:
+            pexels_key = settings.get("pexels_api_key", "").strip()
+            image_provider = settings.get("image_provider", "pollinations")
+            contact_info = settings.get("contact_info", "")
+            try:
+                if image_provider == "pexels" and pexels_key:
+                    from openai_service import fetch_image_pexels
+                    new_img = await fetch_image_pexels(topic, pexels_key, contact_info=contact_info)
+                else:
+                    from openai_service import generate_image_pollinations
+                    new_img = await generate_image_pollinations(topic, topic, contact_info=contact_info)
+                image_path = _resolve_image_path(new_img)
+                db.update_post(post_id, image_path=new_img)
+                logger.info(f"{'Regenerated' if file_missing else 'Generated'} image for post {post_id}: {new_img}")
+            except Exception as img_e:
+                logger.warning(f"Image generation failed for post {post_id}: {img_e}")
+                image_path = ""
+
+    # Attach CBR rates if the setting is enabled
     post_text = strip_rates_block(post["text"])
-    rates = await get_cbr_rates()
-    rates_block = format_rates_for_post(rates)
-    if rates_block:
-        post_text = post_text.rstrip() + "\n\n" + rates_block
+    if settings.get("add_rates_to_posts", "true") == "true":
+        rates = await get_cbr_rates()
+        rates_block = format_rates_for_post(rates)
+        if rates_block:
+            post_text = post_text.rstrip() + "\n\n" + rates_block
 
     results = await send_post(
         bot_token=bot_token,
@@ -250,7 +323,7 @@ async def publish_post(post_id: int) -> str:
     return ""
 
 
-async def auto_generate_and_publish() -> int:
+async def auto_generate_and_publish() -> tuple:
     from openai import AsyncOpenAI
     from openai_service import generate_text_variants, DEFAULT_MODELS
 
@@ -289,9 +362,7 @@ async def auto_generate_and_publish() -> int:
             image_path = await fetch_image_pexels(topic, pexels_key, contact_info=contact_info, hook=hook)
         elif image_provider == "openai":
             from openai_service import generate_image as gen_img, _add_branding
-            from pathlib import Path as _Path
             img_path_str = await gen_img(topic, v["text"], client)
-            # Apply branding to DALL-E images (saved as PNG, re-save with overlay)
             local = IMAGES_DIR / img_path_str[8:]
             _add_branding(local, topic, contact_info=contact_info, hook=hook)
             image_path = img_path_str
@@ -312,13 +383,12 @@ async def auto_generate_and_publish() -> int:
 
 
 async def auto_post():
-    posts = db.get_scheduled_posts()
-    if posts:
-        await publish_post(posts[0]["id"])  # return value intentionally ignored for scheduler
-        return
-
+    """Runs at configured times. Publishing scheduled posts is handled by check_scheduled (every minute).
+    This function only auto-generates new content when the queue is empty and auto_generate_enabled is on."""
     settings = _effective_settings()
-    if settings.get("auto_generate_enabled", "false") == "true":
+    if settings.get("auto_generate_enabled", "false") != "true":
+        return
+    if not db.get_scheduled_posts():
         await auto_generate_and_publish()
 
 
@@ -326,6 +396,18 @@ async def auto_post():
 
 async def _generate_week_bg(settings: dict):
     """Generate posts for the next 7 days: one post per scheduled time per day."""
+    global _week_gen_running
+    if _week_gen_running:
+        logger.warning("Week generation already running, skipping duplicate call")
+        return
+    _week_gen_running = True
+    try:
+        await _do_generate_week(settings)
+    finally:
+        _week_gen_running = False
+
+
+async def _do_generate_week(settings: dict):
     from openai import AsyncOpenAI
     from openai_service import generate_text_variants, DEFAULT_MODELS
     from zoneinfo import ZoneInfo
@@ -342,7 +424,7 @@ async def _generate_week_bg(settings: dict):
     contact_info = settings.get("contact_info", "")
     pexels_key = settings.get("pexels_api_key", "").strip()
     image_provider = settings.get("image_provider", "pollinations")
-    times_raw = json.loads(settings.get("auto_post_times", '["10:00","19:00"]'))
+    times_raw = _safe_times(settings.get("auto_post_times", '["10:00","19:00"]'))
     if not times_raw:
         times_raw = ["10:00"]
 
@@ -351,14 +433,21 @@ async def _generate_week_bg(settings: dict):
         kwargs["base_url"] = base_url
     client = AsyncOpenAI(**kwargs)
 
-    MOSCOW_TZ = ZoneInfo("Europe/Moscow")
+    MOSCOW_TZ = ZoneInfo("Asia/Irkutsk")
     now = datetime.now(MOSCOW_TZ)
 
     used_topics: set = set()
     created = 0
     total = 7 * len(times_raw)
 
-    # Strictly alternate article/promo across all slots
+    # Collect already-scheduled slots to skip duplicates
+    existing_slots = {
+        p.get("scheduled_at", "")[:16]
+        for p in db.get_scheduled_posts()
+        if p.get("scheduled_at")
+    }
+
+    # Strictly alternate formats across all slots
     slot_index = 0
 
     for day_offset in range(1, 8):
@@ -369,6 +458,11 @@ async def _generate_week_bg(settings: dict):
             scheduled_at = datetime(
                 target_day.year, target_day.month, target_day.day, hour, minute
             ).isoformat()
+
+            if scheduled_at[:16] in existing_slots:
+                logger.info(f"Week gen: {scheduled_at[:16]} already has a post — skipping")
+                slot_index += 1
+                continue
 
             # Pick unique topic within this batch
             recent = db.get_posts(status="published")
@@ -435,7 +529,7 @@ async def lifespan(app: FastAPI):
     sched.start(publish_callback=publish_post)
 
     settings = _effective_settings()
-    times = json.loads(settings.get("auto_post_times", '["10:00","19:00"]'))
+    times = _safe_times(settings.get("auto_post_times", '["10:00","19:00"]'))
     enabled = settings.get("auto_post_enabled", "false") == "true"
     sched.apply_auto_post(times, enabled, auto_post)
 
@@ -450,10 +544,30 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 app.mount("/images", StaticFiles(directory=str(IMAGES_DIR)), name="images")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+_AUTH_PUBLIC = {"/", "/health"}
+
+
+@app.middleware("http")
+async def _auth_middleware(request: Request, call_next):
+    if ADMIN_PASSWORD:
+        path = request.url.path
+        if path not in _AUTH_PUBLIC and not path.startswith(("/static/", "/images/")):
+            if request.headers.get("authorization", "") != f"Bearer {ADMIN_PASSWORD}":
+                return JSONResponse({"detail": "Unauthorized"}, status_code=401)
+    return await call_next(request)
+
 
 @app.get("/health")
-async def health():
+async def health(background_tasks: BackgroundTasks):
+    # Each health ping also checks for due scheduled posts —
+    # so an external keepalive service (UptimeRobot etc.) doubles as a publish trigger.
+    background_tasks.add_task(sched.check_scheduled)
     return {"ok": True, "storage": "postgresql" if db.IS_PG else "sqlite_ephemeral"}
+
+
+@app.get("/api/storage-type")
+async def storage_type():
+    return {"type": "postgresql" if db.IS_PG else "sqlite_ephemeral"}
 
 
 @app.get("/")
@@ -494,6 +608,7 @@ class SettingsIn(BaseModel):
     auto_generate_enabled: Optional[str] = None
     brand_voice: Optional[str] = None
     contact_info: Optional[str] = None
+    add_rates_to_posts: Optional[str] = None
 
 
 @app.put("/api/settings")
@@ -504,7 +619,7 @@ async def save_settings(data: SettingsIn):
 
     if "auto_post_enabled" in updates or "auto_post_times" in updates:
         s = _effective_settings()
-        times = json.loads(s.get("auto_post_times", '["10:00","19:00"]'))
+        times = _safe_times(s.get("auto_post_times", '["10:00","19:00"]'))
         enabled = s.get("auto_post_enabled", "false") == "true"
         sched.apply_auto_post(times, enabled, auto_post)
 
@@ -525,6 +640,12 @@ async def test_telegram():
 @app.get("/api/currency")
 async def currency():
     return await get_cbr_rates()
+
+
+@app.get("/api/default-brand-voice")
+async def get_default_brand_voice():
+    from openai_service import SYSTEM_PROMPT
+    return {"brand_voice": SYSTEM_PROMPT}
 
 
 # ── Generate ──────────────────────────────────────────────────────────────────
@@ -582,7 +703,7 @@ async def generate(req: GenerateIn):
         return {"variants": variants}
     except Exception as e:
         logger.error(f"Generate error: {e}")
-        raise HTTPException(500, str(e))
+        raise HTTPException(500, "Ошибка генерации текста. Проверьте настройки AI.")
 
 
 class GenerateImageIn(BaseModel):
@@ -615,7 +736,7 @@ async def generate_image(req: GenerateImageIn):
         return {"image_url": url}
     except Exception as e:
         logger.error(f"Image error: {e}")
-        raise HTTPException(500, str(e))
+        raise HTTPException(500, "Ошибка генерации изображения.")
 
 
 # ── Posts CRUD ────────────────────────────────────────────────────────────────
@@ -636,14 +757,6 @@ async def list_posts(status: Optional[str] = None):
     return {"posts": db.get_posts(status)}
 
 
-@app.get("/api/posts/{post_id}")
-async def get_post(post_id: int):
-    post = db.get_post(post_id)
-    if not post:
-        raise HTTPException(404, "Not found")
-    return post
-
-
 @app.post("/api/posts")
 async def create_post(req: PostIn):
     pid = db.create_post(
@@ -653,6 +766,25 @@ async def create_post(req: PostIn):
         scheduled_at=req.scheduled_at,
     )
     return {"id": pid, "success": True}
+
+
+# /bulk must be declared before /{post_id} so FastAPI doesn't parse "bulk" as an int
+@app.delete("/api/posts/bulk")
+async def bulk_delete_posts(status: str):
+    if status not in {"draft", "failed"}:
+        raise HTTPException(400, "Можно удалять только черновики и ошибки")
+    posts = db.get_posts(status)
+    for p in posts:
+        db.delete_post(p["id"])
+    return {"deleted": len(posts)}
+
+
+@app.get("/api/posts/{post_id}")
+async def get_post(post_id: int):
+    post = db.get_post(post_id)
+    if not post:
+        raise HTTPException(404, "Not found")
+    return post
 
 
 @app.put("/api/posts/{post_id}")
@@ -707,12 +839,14 @@ async def calendar():
             date = post["published_at"][:10]
         if not date:
             continue
+        slot_dt = post.get("scheduled_at") or post.get("published_at") or ""
         result.setdefault(date, []).append({
             "id": post["id"],
             "text": post["text"][:100],
             "status": post["status"],
             "image_path": post.get("image_path", ""),
             "topic": post.get("topic", ""),
+            "time": slot_dt[11:16] if len(slot_dt) > 10 else "",
         })
     return result
 
@@ -732,7 +866,7 @@ async def trigger_autopilot():
         post_id, tg_error = await auto_generate_and_publish()
     except Exception as e:
         logger.error(f"Autopilot trigger error: {e}")
-        raise HTTPException(500, str(e))
+        raise HTTPException(500, "Ошибка автопилота. Проверьте настройки AI и Telegram.")
 
     if not tg_error:
         return {"success": True, "message": "Пост опубликован в Telegram ✓"}
@@ -741,10 +875,12 @@ async def trigger_autopilot():
 
 @app.post("/api/autopilot/generate-week")
 async def generate_week_endpoint(background_tasks: BackgroundTasks):
+    if _week_gen_running:
+        raise HTTPException(409, "Генерация уже запущена. Подождите завершения.")
     settings = _effective_settings()
     if not settings.get("openai_api_key", ""):
         raise HTTPException(400, "AI API ключ не настроен — добавьте его в Настройках")
-    times_raw = json.loads(settings.get("auto_post_times", '["10:00","19:00"]'))
+    times_raw = _safe_times(settings.get("auto_post_times", '["10:00","19:00"]'))
     total = 7 * max(len(times_raw), 1)
     background_tasks.add_task(_generate_week_bg, settings)
     return {"message": f"Запущено! {total} постов создаются в фоне — проверьте Историю через 2–3 минуты."}
