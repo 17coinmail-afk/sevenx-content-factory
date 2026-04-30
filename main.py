@@ -441,13 +441,11 @@ async def check_auto_post():
                 logger.info(f"check_auto_post: слот {key} уже обработан в этой сессии")
                 continue
 
-            # Проверяем БД: пост опубликован в этом окне?
-            # Сравниваем по UTC-времени published_at с диапазоном в UTC
-            # (published_at сохраняется как UTC через datetime.now().isoformat())
+            # Простая проверка: есть ли published пост за последние 2 часа?
+            # published_at хранится как UTC (datetime.now().isoformat()), поэтому
+            # сравниваем отсечку тоже в UTC.
             from datetime import timezone
             now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
-            slot_utc = now_utc.replace(hour=slot.hour - 8, minute=slot.minute, second=0, microsecond=0)
-            # Простая проверка: есть ли published пост за последние 2 часа UTC?
             cutoff_utc = (now_utc - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M")
             recent = db.get_posts("published")
             already = any(
