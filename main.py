@@ -442,21 +442,25 @@ async def check_auto_post():
                 continue
 
             # Простая проверка: есть ли published пост за последние 2 часа?
-            # published_at хранится как UTC (datetime.now().isoformat()), поэтому
-            # сравниваем отсечку тоже в UTC.
+            # published_at хранится как UTC. PostgreSQL возвращает datetime-объект,
+            # SQLite — строку. Нормализуем через _pa_str().
             from datetime import timezone
+
+            def _pa_str(p):
+                val = p.get("published_at", "")
+                if hasattr(val, "isoformat"):  # datetime object (PostgreSQL)
+                    return val.isoformat()
+                return str(val) if val else ""
+
             now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
             cutoff_utc = (now_utc - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M")
             recent = db.get_posts("published")
-            already = any(
-                p.get("published_at", "") >= cutoff_utc
-                for p in recent[:20]
-            )
+            already = any(_pa_str(p)[:16] >= cutoff_utc for p in recent[:20])
             logger.info(f"check_auto_post: already_published_in_2h={already}, cutoff_utc={cutoff_utc}")
 
             if already:
                 _auto_post_triggered.add(key)
-                logger.info(f"check_auto_post: пост уже есть за последние 2 часа, пропускаю")
+                logger.info("check_auto_post: пост уже есть за последние 2 часа, пропускаю")
                 continue
 
             logger.info(f"check_auto_post: ЗАПУСКАЮ авто-генерацию для слота {key}")
@@ -467,10 +471,7 @@ async def check_auto_post():
 
                 # 2. Есть ли уже пост за последние 2 часа (после check_scheduled)?
                 recent2 = db.get_posts("published")
-                already2 = any(
-                    p.get("published_at", "") >= cutoff_utc
-                    for p in recent2[:20]
-                )
+                already2 = any(_pa_str(p)[:16] >= cutoff_utc for p in recent2[:20])
                 if already2:
                     logger.info("check_auto_post: запланированный пост опубликован check_scheduled")
                 else:
@@ -986,6 +987,12 @@ async def autopilot_debug():
     times = _safe_times(settings.get("auto_post_times", '["10:00","19:00"]'))
     cutoff_utc = (now_utc - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M")
 
+    def _pa(p):
+        val = p.get("published_at", "")
+        if hasattr(val, "isoformat"):
+            return val.isoformat()
+        return str(val) if val else ""
+
     slot_analysis = []
     for time_str in times:
         try:
@@ -996,9 +1003,9 @@ async def autopilot_debug():
             in_window = slot <= now <= slot + timedelta(hours=2)
             recent = db.get_posts("published")
             published_recently = [
-                {"id": p["id"], "published_at": p.get("published_at", "")}
+                {"id": p["id"], "published_at": _pa(p)}
                 for p in recent[:5]
-                if p.get("published_at", "") >= cutoff_utc
+                if _pa(p)[:16] >= cutoff_utc
             ]
             slot_analysis.append({
                 "time": time_str, "slot_iso": slot_iso,
@@ -1009,7 +1016,7 @@ async def autopilot_debug():
         except Exception as e:
             slot_analysis.append({"time": time_str, "error": str(e)})
 
-    recent5 = [{"id": p["id"], "published_at": p.get("published_at", ""), "status": p["status"]}
+    recent5 = [{"id": p["id"], "published_at": _pa(p), "status": p["status"]}
                for p in db.get_posts("published")[:5]]
 
     return {
