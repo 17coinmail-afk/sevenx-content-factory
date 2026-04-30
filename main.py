@@ -384,112 +384,113 @@ async def auto_generate_and_publish() -> tuple:
     return post_id, tg_error
 
 
-async def auto_post():
-    """Публикует просроченные запланированные посты, потом авто-генерирует если включено и очередь пуста."""
-    global _auto_post_running
-    if _auto_post_running:
-        return
-    _auto_post_running = True
-    try:
-        await sched.check_scheduled()
-        settings = _effective_settings()
-        if settings.get("auto_generate_enabled", "false") != "true":
-            return
-        if not db.get_scheduled_posts():
-            await auto_generate_and_publish()
-    finally:
-        _auto_post_running = False
+def _pa_str(p: dict) -> str:
+    """Нормализует published_at в строку ISO. PostgreSQL → datetime-объект, SQLite → str."""
+    val = p.get("published_at") or ""
+    return val.isoformat() if hasattr(val, "isoformat") else str(val)
 
 
-async def check_auto_post():
-    """Вызывается на каждый /health пинг. Запускает авто-пост если прошло нужное время,
-    а пост за этот слот ещё не публиковался. Работает даже после перезапуска Render."""
-    global _auto_post_running
+def _slot_utc_window(slot: datetime) -> tuple[str, str]:
+    """Возвращает (win_start, win_end) в UTC для наивного Иркутского datetime.
+    Irkutsk = UTC+8. Окно: [slot_utc - 30мин .. slot_utc + 2ч]."""
+    from datetime import timedelta
+    slot_utc = slot - timedelta(hours=8)
+    return (
+        (slot_utc - timedelta(minutes=30)).strftime("%Y-%m-%dT%H:%M"),
+        (slot_utc + timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M"),
+    )
+
+
+async def _auto_post_due_slot() -> tuple | None:
+    """Быстрая синхронная проверка (< 100мс, только чтение БД).
+    Возвращает (key, win_start, win_end) если нужно публиковать, иначе None.
+    Вызывается прямо в теле /health — гарантированно отрабатывает при каждом пинге."""
     from zoneinfo import ZoneInfo
     from datetime import timedelta
 
-    if _auto_post_running:
-        logger.info("check_auto_post: пропуск — уже выполняется")
-        return
-
     settings = _effective_settings()
-    enabled = settings.get("auto_generate_enabled", "false")
-    if enabled != "true":
-        logger.info(f"check_auto_post: автопилот выключен (auto_generate_enabled={enabled!r})")
-        return
+    if settings.get("auto_generate_enabled", "false") != "true":
+        return None
 
     tz = ZoneInfo("Asia/Irkutsk")
     now = datetime.now(tz).replace(tzinfo=None)
     times = _safe_times(settings.get("auto_post_times", '["10:00","19:00"]'))
-    logger.info(f"check_auto_post: сейчас {now.strftime('%H:%M')} Иркутск, слоты: {times}")
 
     for time_str in sorted(times):
         try:
             hour, minute = map(int, time_str.split(":"))
             slot = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-            slot_iso = slot.strftime("%Y-%m-%dT%H:%M")
-            slot_end_iso = (slot + timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M")
 
-            in_window = slot <= now <= slot + timedelta(hours=2)
-            logger.info(f"check_auto_post: слот {time_str} → окно [{slot_iso}..{slot_end_iso}], in_window={in_window}")
-
-            if not in_window:
+            if not (slot <= now <= slot + timedelta(hours=2)):
                 continue
 
             key = slot.strftime("%Y-%m-%d_%H:%M")
             if key in _auto_post_triggered:
-                logger.info(f"check_auto_post: слот {key} уже обработан в этой сессии")
                 continue
 
-            # Проверяем: был ли уже пост именно для ЭТОГО слота?
-            # published_at хранится в UTC. Иркутск = UTC+8, значит slot (Иркутск) = slot - 8ч в UTC.
-            # Окно поиска: [slot_utc - 30мин .. slot_utc + 2ч] — чтобы не блокировать соседние слоты.
-            # PostgreSQL возвращает datetime-объект, SQLite — строку. Нормализуем через _pa_str().
-
-            def _pa_str(p):
-                val = p.get("published_at", "")
-                if hasattr(val, "isoformat"):
-                    return val.isoformat()
-                return str(val) if val else ""
-
-            slot_utc = slot - timedelta(hours=8)  # наивный UTC-эквивалент слота
-            win_start = (slot_utc - timedelta(minutes=30)).strftime("%Y-%m-%dT%H:%M")
-            win_end   = (slot_utc + timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M")
-
+            win_start, win_end = _slot_utc_window(slot)
             recent = db.get_posts("published")
             already = any(win_start <= _pa_str(p)[:16] <= win_end for p in recent[:20])
-            logger.info(f"check_auto_post: slot_window_utc=[{win_start}..{win_end}], already={already}")
+
+            logger.info(
+                f"autopilot: слот {key}, UTC-окно [{win_start}..{win_end}], "
+                f"сейчас {now.strftime('%H:%M')} Иркутск, пост в окне: {already}"
+            )
 
             if already:
                 _auto_post_triggered.add(key)
-                logger.info("check_auto_post: пост для этого слота уже есть, пропускаю")
-                continue
+            else:
+                return key, win_start, win_end
 
-            logger.info(f"check_auto_post: ЗАПУСКАЮ авто-генерацию для слота {key}")
-            _auto_post_running = True
-            try:
-                # 1. Публикуем запланированные посты (если есть просроченные)
-                await sched.check_scheduled()
-
-                # 2. Есть ли пост в окне этого слота (после check_scheduled)?
-                recent2 = db.get_posts("published")
-                already2 = any(win_start <= _pa_str(p)[:16] <= win_end for p in recent2[:20])
-                if already2:
-                    logger.info("check_auto_post: запланированный пост опубликован check_scheduled")
-                else:
-                    # 3. Авто-генерируем новый пост
-                    await auto_generate_and_publish()
-                    logger.info("check_auto_post: авто-генерация завершена")
-
-                # Отмечаем слот обработанным только при успехе
-                _auto_post_triggered.add(key)
-            finally:
-                _auto_post_running = False
-
-            return  # один слот за раз
         except Exception as e:
-            _auto_post_running = False
-            logger.error(f"check_auto_post ошибка для {time_str}: {e}", exc_info=True)
+            logger.error(f"_auto_post_due_slot: ошибка для {time_str}: {e}", exc_info=True)
+
+    return None
+
+
+async def _run_auto_post_slot(key: str, win_start: str, win_end: str) -> None:
+    """Медленная часть: публикует запланированные посты, потом авто-генерирует если слот пуст.
+    Запускается как background task после /health."""
+    global _auto_post_running
+    if _auto_post_running:
+        logger.info(f"_run_auto_post_slot: {key} — уже выполняется, пропуск")
+        return
+    _auto_post_running = True
+    try:
+        # 1. Публикуем просроченные запланированные посты (может закрыть этот слот)
+        await sched.check_scheduled()
+
+        # 2. Перепроверяем: появился ли пост в окне после check_scheduled?
+        recent = db.get_posts("published")
+        if any(win_start <= _pa_str(p)[:16] <= win_end for p in recent[:20]):
+            logger.info(f"_run_auto_post_slot: {key} — закрыт запланированным постом")
+            _auto_post_triggered.add(key)
+            return
+
+        # 3. Авто-генерация
+        logger.info(f"_run_auto_post_slot: {key} — запускаю авто-генерацию")
+        post_id, tg_error = await auto_generate_and_publish()
+        if tg_error:
+            logger.error(f"_run_auto_post_slot: {key} — ошибка Telegram: {tg_error}")
+        else:
+            logger.info(f"_run_auto_post_slot: {key} — пост {post_id} опубликован ✓")
+        _auto_post_triggered.add(key)
+
+    except Exception as e:
+        logger.error(f"_run_auto_post_slot: {key} — исключение: {e}", exc_info=True)
+        # Ключ НЕ добавляется в triggered — следующий пинг повторит попытку
+    finally:
+        _auto_post_running = False
+
+
+async def auto_post():
+    """Вызывается APScheduler cron-задачами (когда процесс не спит)."""
+    slot_info = await _auto_post_due_slot()
+    if slot_info:
+        key, win_start, win_end = slot_info
+        await _run_auto_post_slot(key, win_start, win_end)
+    else:
+        await sched.check_scheduled()
 
 
 # ── Week generation (background) ─────────────────────────────────────────────
@@ -664,8 +665,18 @@ async def _auth_middleware(request: Request, call_next):
 @app.get("/health")
 async def health(background_tasks: BackgroundTasks):
     from zoneinfo import ZoneInfo
-    background_tasks.add_task(sched.check_scheduled)
-    background_tasks.add_task(check_auto_post)
+
+    # SYNCHRONOUS: решение «постить или нет» принимается прямо здесь, до отправки ответа.
+    # Это гарантирует что проверка точно выполнится при каждом пинге.
+    slot_info = await _auto_post_due_slot()
+    if slot_info:
+        key, win_start, win_end = slot_info
+        logger.info(f"health: слот {key} активен → добавляю генерацию в background")
+        background_tasks.add_task(_run_auto_post_slot, key, win_start, win_end)
+    else:
+        # Нет слота для публикации — просто проверяем запланированные посты
+        background_tasks.add_task(sched.check_scheduled)
+
     irkutsk_now = datetime.now(ZoneInfo("Asia/Irkutsk")).strftime("%H:%M %d.%m.%Y")
     return {"ok": True, "storage": "postgresql" if db.IS_PG else "sqlite_ephemeral", "server_time_irkutsk": irkutsk_now}
 
@@ -987,13 +998,6 @@ async def autopilot_debug():
     now = now_irkutsk.replace(tzinfo=None)
     now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
     times = _safe_times(settings.get("auto_post_times", '["10:00","19:00"]'))
-    cutoff_utc = (now_utc - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M")
-
-    def _pa(p):
-        val = p.get("published_at", "")
-        if hasattr(val, "isoformat"):
-            return val.isoformat()
-        return str(val) if val else ""
 
     slot_analysis = []
     recent_all = db.get_posts("published")
@@ -1001,21 +1005,20 @@ async def autopilot_debug():
         try:
             hour, minute = map(int, time_str.split(":"))
             slot = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-            slot_iso = slot.strftime("%Y-%m-%dT%H:%M")
-            key = slot.strftime("%Y-%m-%d_%H:%M")
             in_window = slot <= now <= slot + timedelta(hours=2)
-            slot_utc = slot - timedelta(hours=8)
-            win_start = (slot_utc - timedelta(minutes=30)).strftime("%Y-%m-%dT%H:%M")
-            win_end   = (slot_utc + timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M")
+            key = slot.strftime("%Y-%m-%d_%H:%M")
+            win_start, win_end = _slot_utc_window(slot)
             posts_in_slot = [
-                {"id": p["id"], "published_at": _pa(p)}
+                {"id": p["id"], "published_at": _pa_str(p)}
                 for p in recent_all[:10]
-                if win_start <= _pa(p)[:16] <= win_end
+                if win_start <= _pa_str(p)[:16] <= win_end
             ]
             slot_analysis.append({
-                "time": time_str, "slot_iso": slot_iso,
+                "time": time_str,
+                "slot_irkutsk": slot.strftime("%Y-%m-%dT%H:%M"),
                 "slot_window_utc": f"[{win_start}..{win_end}]",
-                "in_window": in_window, "key": key,
+                "in_window": in_window,
+                "key": key,
                 "key_triggered": key in _auto_post_triggered,
                 "already_published": bool(posts_in_slot),
                 "posts_in_slot_window": posts_in_slot,
@@ -1023,7 +1026,7 @@ async def autopilot_debug():
         except Exception as e:
             slot_analysis.append({"time": time_str, "error": str(e)})
 
-    recent5 = [{"id": p["id"], "published_at": _pa(p), "status": p["status"]}
+    recent5 = [{"id": p["id"], "published_at": _pa_str(p), "status": p["status"]}
                for p in db.get_posts("published")[:5]]
 
     return {
