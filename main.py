@@ -31,6 +31,7 @@ ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "").strip()
 _week_gen_running = False
 _auto_post_running = False
 _auto_post_triggered: set = set()  # "YYYY-MM-DD_HH:MM" — чтобы не постить дважды в одном слоте
+_bg_tasks: set = set()  # держим сильные ссылки на asyncio tasks, иначе GC убьёт незавершённую задачу
 
 # Mapping: settings DB key → environment variable name
 _ENV_MAP = {
@@ -667,19 +668,19 @@ async def health():
     import asyncio
     from zoneinfo import ZoneInfo
 
-    # Решение «постить или нет» принимается синхронно (< 100мс, только чтение БД).
-    # Гарантированно выполняется на каждом пинге.
     slot_info = await _auto_post_due_slot()
 
     if slot_info:
         key, win_start, win_end = slot_info
         logger.info(f"health: слот {key} → запускаю генерацию")
-        # asyncio.create_task — задача живёт в event loop, независимо от HTTP-цикла.
-        # Это надёжнее FastAPI BackgroundTasks для долгих операций (AI ~20-30 сек).
         task = asyncio.create_task(_run_auto_post_slot(key, win_start, win_end))
-        task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
+        # Храним сильную ссылку — без этого GC уничтожит задачу пока она ждёт OpenAI (~20-30 сек)
+        _bg_tasks.add(task)
+        task.add_done_callback(_bg_tasks.discard)
     else:
-        asyncio.create_task(sched.check_scheduled())
+        task = asyncio.create_task(sched.check_scheduled())
+        _bg_tasks.add(task)
+        task.add_done_callback(_bg_tasks.discard)
 
     irkutsk_now = datetime.now(ZoneInfo("Asia/Irkutsk")).strftime("%H:%M %d.%m.%Y")
     return {"ok": True, "storage": "postgresql" if db.IS_PG else "sqlite_ephemeral", "server_time_irkutsk": irkutsk_now}
