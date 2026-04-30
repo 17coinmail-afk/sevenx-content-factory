@@ -500,9 +500,19 @@
           </div>
         </div>
 
-        <!-- Info note -->
-        <div class="text-xs text-[#5a8a6a] bg-[#071410] border border-[#1a3328] rounded-xl px-3 py-2.5 mb-4">
-          ℹ️ Запланированные посты из Календаря публикуются автоматически в указанное время — независимо от автопилота
+        <!-- Info note + test button -->
+        <div class="flex gap-2 items-start mb-4">
+          <div class="flex-1 text-xs text-[#5a8a6a] bg-[#071410] border border-[#1a3328] rounded-xl px-3 py-2.5">
+            ℹ️ Запланированные посты из Календаря публикуются автоматически в указанное время — независимо от автопилота
+          </div>
+          <button @click="testAutopilot()" :disabled="sf.testLoading"
+                  class="flex-shrink-0 bg-[#071410] border border-[#2d6a4f] hover:bg-[#2d6a4f] disabled:opacity-40 text-[#6bbf8e] text-xs font-semibold px-3 py-2.5 rounded-xl transition-all flex items-center gap-1.5">
+            <svg x-show="sf.testLoading" class="spin w-3 h-3" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+            </svg>
+            <span x-text="sf.testLoading ? 'Запуск...' : '🧪 Тест'"></span>
+          </button>
         </div>
 
         <!-- Time slots -->
@@ -782,6 +792,7 @@ function app() {
       ai_base_url: '', ai_model: '', image_provider: 'pollinations',
       pexels_api_key: '',
       auto_generate_enabled: 'false',
+      testLoading: false,
       brand_voice: '', contact_info: '',
       add_rates_to_posts: 'true',
       saving: false, weekLoading: false,
@@ -891,6 +902,22 @@ function app() {
         if (r.ok && d.success) this.notify('✅ Бот @' + d.bot_name + ' подключён!');
         else this.notify('❌ Ошибка: ' + (d.error || d.detail || 'Unknown'), 'error');
       } catch(e) { this.notify('❌ Ошибка соединения', 'error'); }
+    },
+
+    async testAutopilot() {
+      this.sf.testLoading = true;
+      try {
+        const r = await this.authFetch('/api/autopilot/trigger', { method: 'POST' });
+        const d = await r.json();
+        if (r.ok) {
+          this.notify('✅ ' + (d.message || 'Пост опубликован!'));
+          await this.loadHist();
+          await this.loadQueue();
+        } else {
+          this.notify('❌ ' + (d.detail || 'Ошибка автопилота'), 'error');
+        }
+      } catch(e) { this.notify('❌ Ошибка соединения', 'error'); }
+      finally { this.sf.testLoading = false; }
     },
 
     async loadDefaultBrandVoice() {
