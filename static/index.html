@@ -517,7 +517,10 @@
 
         <!-- Time slots -->
         <div class="mb-1">
-          <label class="block text-xs text-[#5a8a6a] mb-2">Время публикаций (Иркутск, UTC+8):</label>
+          <div class="flex items-center justify-between mb-2">
+            <label class="text-xs text-[#5a8a6a]">Время публикаций (Иркутск, UTC+8):</label>
+            <span class="text-xs text-[#3d6b52]" x-text="serverTime ? '🕐 Сервер: ' + serverTime : ''"></span>
+          </div>
           <div class="space-y-2">
             <template x-for="(t, i) in autoTimes" :key="i">
               <div class="flex gap-2">
@@ -761,6 +764,7 @@ function app() {
     calEditImgLoading: false,
 
     currency: {},
+    serverTime: '',
     settings: {},
     storageType: '',
     histPosts: [],
@@ -809,10 +813,18 @@ function app() {
     // ── Init ─────────────────────────────────────────────────────────────────
     async init() {
       this.authToken = sessionStorage.getItem('authToken') || '';
-      await Promise.all([this.loadCurrency(), this.loadSettings(), this.loadStorageType()]);
+      await Promise.all([this.loadCurrency(), this.loadSettings(), this.loadStorageType(), this.loadServerTime()]);
       this.loadQueue();
-      // Refresh currency every 5 minutes
       setInterval(() => this.loadCurrency(), 5 * 60 * 1000);
+      setInterval(() => this.loadServerTime(), 60 * 1000);
+    },
+
+    async loadServerTime() {
+      try {
+        const r = await fetch('/health');
+        const d = await r.json();
+        if (d.server_time_irkutsk) this.serverTime = d.server_time_irkutsk;
+      } catch(e) {}
     },
 
     async loadStorageType() {

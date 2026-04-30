@@ -420,23 +420,29 @@ async def check_auto_post():
             hour, minute = map(int, time_str.split(":"))
             slot = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
 
-            # Окно: от точного времени до +30 минут (покрывает задержку пробуждения Render)
-            if not (slot <= now <= slot + timedelta(minutes=30)):
+            # Слот должен быть уже прошедшим сегодня (но не более 2 часов назад —
+            # чтобы не публиковать за очень старые слоты в конце дня)
+            if not (slot <= now <= slot + timedelta(hours=2)):
                 continue
 
             key = slot.strftime("%Y-%m-%d_%H:%M")
             if key in _auto_post_triggered:
                 continue  # уже обработали этот слот в этом сеансе
 
-            # Проверяем БД: может пост уже опубликован после начала слота?
+            # Проверяем БД: пост в интервале [slot, slot+2ч] уже опубликован?
             slot_iso = slot.strftime("%Y-%m-%dT%H:%M")
+            slot_end_iso = (slot + timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M")
             recent = db.get_posts("published")
-            if any(p.get("published_at", "") >= slot_iso for p in recent[:10]):
+            already = any(
+                slot_iso <= p.get("published_at", "") <= slot_end_iso
+                for p in recent[:20]
+            )
+            if already:
                 _auto_post_triggered.add(key)
                 continue
 
             _auto_post_triggered.add(key)
-            logger.info(f"check_auto_post: срабатываю для слота {key}")
+            logger.info(f"check_auto_post: срабатываю для слота {key} (сейчас {now.strftime('%H:%M')} Иркутск)")
             await auto_post()
             return  # один слот за раз
         except Exception as e:
@@ -614,11 +620,11 @@ async def _auth_middleware(request: Request, call_next):
 
 @app.get("/health")
 async def health(background_tasks: BackgroundTasks):
-    # Каждый пинг keep-alive = триггер для публикации и авто-генерации.
-    # Так работает даже когда Render спит и APScheduler не может сработать вовремя.
+    from zoneinfo import ZoneInfo
     background_tasks.add_task(sched.check_scheduled)
     background_tasks.add_task(check_auto_post)
-    return {"ok": True, "storage": "postgresql" if db.IS_PG else "sqlite_ephemeral"}
+    irkutsk_now = datetime.now(ZoneInfo("Asia/Irkutsk")).strftime("%H:%M %d.%m.%Y")
+    return {"ok": True, "storage": "postgresql" if db.IS_PG else "sqlite_ephemeral", "server_time_irkutsk": irkutsk_now}
 
 
 @app.get("/api/storage-type")
