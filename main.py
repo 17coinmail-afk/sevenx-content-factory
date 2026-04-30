@@ -409,8 +409,15 @@ async def _auto_post_due_slot() -> tuple | None:
     from zoneinfo import ZoneInfo
     from datetime import timedelta
 
+    # Чистим старые ключи (старше 2 дней) — просто чтобы set не рос вечно
+    if _auto_post_triggered:
+        cutoff = (datetime.now() - timedelta(days=2)).strftime("%Y-%m-%d")
+        stale = {k for k in _auto_post_triggered if k[:10] < cutoff}
+        _auto_post_triggered.difference_update(stale)
+
     settings = _effective_settings()
     if settings.get("auto_generate_enabled", "false") != "true":
+        logger.debug("_auto_post_due_slot: автопилот выключен (auto_generate_enabled != true)")
         return None
 
     tz = ZoneInfo("Asia/Irkutsk")
@@ -668,22 +675,29 @@ async def health():
     import asyncio
     from zoneinfo import ZoneInfo
 
-    slot_info = await _auto_post_due_slot()
+    irkutsk_now = datetime.now(ZoneInfo("Asia/Irkutsk"))
+    irkutsk_str = irkutsk_now.strftime("%H:%M %d.%m.%Y")
+
+    try:
+        slot_info = await _auto_post_due_slot()
+    except Exception as e:
+        logger.error(f"health: ошибка в _auto_post_due_slot: {e}", exc_info=True)
+        slot_info = None
 
     if slot_info:
         key, win_start, win_end = slot_info
-        logger.info(f"health: слот {key} → запускаю генерацию")
+        logger.info(f"health {irkutsk_str}: ЗАПУСК генерации для слота {key}")
         task = asyncio.create_task(_run_auto_post_slot(key, win_start, win_end))
         # Храним сильную ссылку — без этого GC уничтожит задачу пока она ждёт OpenAI (~20-30 сек)
         _bg_tasks.add(task)
         task.add_done_callback(_bg_tasks.discard)
     else:
+        logger.debug(f"health {irkutsk_str}: слот не нужен, запускаю check_scheduled")
         task = asyncio.create_task(sched.check_scheduled())
         _bg_tasks.add(task)
         task.add_done_callback(_bg_tasks.discard)
 
-    irkutsk_now = datetime.now(ZoneInfo("Asia/Irkutsk")).strftime("%H:%M %d.%m.%Y")
-    return {"ok": True, "storage": "postgresql" if db.IS_PG else "sqlite_ephemeral", "server_time_irkutsk": irkutsk_now}
+    return {"ok": True, "storage": "postgresql" if db.IS_PG else "sqlite_ephemeral", "server_time_irkutsk": irkutsk_str}
 
 
 @app.get("/api/storage-type")
