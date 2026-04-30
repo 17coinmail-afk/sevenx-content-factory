@@ -409,67 +409,86 @@ async def check_auto_post():
     from datetime import timedelta
 
     if _auto_post_running:
+        logger.info("check_auto_post: пропуск — уже выполняется")
         return
 
     settings = _effective_settings()
-    if settings.get("auto_generate_enabled", "false") != "true":
+    enabled = settings.get("auto_generate_enabled", "false")
+    if enabled != "true":
+        logger.info(f"check_auto_post: автопилот выключен (auto_generate_enabled={enabled!r})")
         return
 
     tz = ZoneInfo("Asia/Irkutsk")
     now = datetime.now(tz).replace(tzinfo=None)
     times = _safe_times(settings.get("auto_post_times", '["10:00","19:00"]'))
+    logger.info(f"check_auto_post: сейчас {now.strftime('%H:%M')} Иркутск, слоты: {times}")
 
     for time_str in sorted(times):
         try:
             hour, minute = map(int, time_str.split(":"))
             slot = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            slot_iso = slot.strftime("%Y-%m-%dT%H:%M")
+            slot_end_iso = (slot + timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M")
 
-            # Слот должен быть уже прошедшим сегодня (но не более 2 часов назад)
-            if not (slot <= now <= slot + timedelta(hours=2)):
+            in_window = slot <= now <= slot + timedelta(hours=2)
+            logger.info(f"check_auto_post: слот {time_str} → окно [{slot_iso}..{slot_end_iso}], in_window={in_window}")
+
+            if not in_window:
                 continue
 
             key = slot.strftime("%Y-%m-%d_%H:%M")
             if key in _auto_post_triggered:
-                continue  # уже обработали этот слот в этом сеансе
-
-            # Проверяем БД: пост в интервале [slot, slot+2ч] уже опубликован?
-            slot_iso = slot.strftime("%Y-%m-%dT%H:%M")
-            slot_end_iso = (slot + timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M")
-            recent = db.get_posts("published")
-            already = any(
-                slot_iso <= p.get("published_at", "") <= slot_end_iso
-                for p in recent[:20]
-            )
-            if already:
-                _auto_post_triggered.add(key)
+                logger.info(f"check_auto_post: слот {key} уже обработан в этой сессии")
                 continue
 
-            _auto_post_triggered.add(key)
-            logger.info(f"check_auto_post: срабатываю для слота {key} (сейчас {now.strftime('%H:%M')} Иркутск)")
+            # Проверяем БД: пост опубликован в этом окне?
+            # Сравниваем по UTC-времени published_at с диапазоном в UTC
+            # (published_at сохраняется как UTC через datetime.now().isoformat())
+            from datetime import timezone
+            now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+            slot_utc = now_utc.replace(hour=slot.hour - 8, minute=slot.minute, second=0, microsecond=0)
+            # Простая проверка: есть ли published пост за последние 2 часа UTC?
+            cutoff_utc = (now_utc - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M")
+            recent = db.get_posts("published")
+            already = any(
+                p.get("published_at", "") >= cutoff_utc
+                for p in recent[:20]
+            )
+            logger.info(f"check_auto_post: already_published_in_2h={already}, cutoff_utc={cutoff_utc}")
 
+            if already:
+                _auto_post_triggered.add(key)
+                logger.info(f"check_auto_post: пост уже есть за последние 2 часа, пропускаю")
+                continue
+
+            logger.info(f"check_auto_post: ЗАПУСКАЮ авто-генерацию для слота {key}")
             _auto_post_running = True
             try:
-                # 1. Публикуем запланированные посты (если есть именно на этот слот)
+                # 1. Публикуем запланированные посты (если есть просроченные)
                 await sched.check_scheduled()
 
-                # 2. Проверяем: опубликовался ли уже пост в этом слоте?
+                # 2. Есть ли уже пост за последние 2 часа (после check_scheduled)?
                 recent2 = db.get_posts("published")
-                published_in_slot = any(
-                    slot_iso <= p.get("published_at", "") <= slot_end_iso
+                already2 = any(
+                    p.get("published_at", "") >= cutoff_utc
                     for p in recent2[:20]
                 )
-
-                # 3. Если нет — авто-генерируем новый пост (независимо от будущих запланированных)
-                if not published_in_slot:
-                    logger.info(f"check_auto_post: нет поста в слоте {key}, запускаю авто-генерацию")
+                if already2:
+                    logger.info("check_auto_post: запланированный пост опубликован check_scheduled")
+                else:
+                    # 3. Авто-генерируем новый пост
                     await auto_generate_and_publish()
+                    logger.info("check_auto_post: авто-генерация завершена")
+
+                # Отмечаем слот обработанным только при успехе
+                _auto_post_triggered.add(key)
             finally:
                 _auto_post_running = False
 
             return  # один слот за раз
         except Exception as e:
             _auto_post_running = False
-            logger.error(f"check_auto_post ошибка для {time_str}: {e}")
+            logger.error(f"check_auto_post ошибка для {time_str}: {e}", exc_info=True)
 
 
 # ── Week generation (background) ─────────────────────────────────────────────
@@ -955,6 +974,57 @@ async def trigger_autopilot():
     if not tg_error:
         return {"success": True, "message": "Пост опубликован в Telegram ✓"}
     raise HTTPException(500, f"Telegram: {tg_error}")
+
+
+@app.get("/api/autopilot/debug")
+async def autopilot_debug():
+    from zoneinfo import ZoneInfo
+    from datetime import timedelta, timezone
+    settings = _effective_settings()
+    tz = ZoneInfo("Asia/Irkutsk")
+    now_irkutsk = datetime.now(tz)
+    now = now_irkutsk.replace(tzinfo=None)
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+    times = _safe_times(settings.get("auto_post_times", '["10:00","19:00"]'))
+    cutoff_utc = (now_utc - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M")
+
+    slot_analysis = []
+    for time_str in times:
+        try:
+            hour, minute = map(int, time_str.split(":"))
+            slot = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            slot_iso = slot.strftime("%Y-%m-%dT%H:%M")
+            key = slot.strftime("%Y-%m-%d_%H:%M")
+            in_window = slot <= now <= slot + timedelta(hours=2)
+            recent = db.get_posts("published")
+            published_recently = [
+                {"id": p["id"], "published_at": p.get("published_at", "")}
+                for p in recent[:5]
+                if p.get("published_at", "") >= cutoff_utc
+            ]
+            slot_analysis.append({
+                "time": time_str, "slot_iso": slot_iso,
+                "in_window": in_window, "key": key,
+                "key_triggered": key in _auto_post_triggered,
+                "posts_in_last_2h": published_recently,
+            })
+        except Exception as e:
+            slot_analysis.append({"time": time_str, "error": str(e)})
+
+    recent5 = [{"id": p["id"], "published_at": p.get("published_at", ""), "status": p["status"]}
+               for p in db.get_posts("published")[:5]]
+
+    return {
+        "server_time_irkutsk": now_irkutsk.strftime("%H:%M:%S %d.%m.%Y"),
+        "server_time_utc": now_utc.strftime("%H:%M:%S %d.%m.%Y"),
+        "auto_generate_enabled": settings.get("auto_generate_enabled"),
+        "auto_post_times": times,
+        "auto_post_running": _auto_post_running,
+        "triggered_keys": sorted(_auto_post_triggered),
+        "cutoff_utc_2h": cutoff_utc,
+        "slot_analysis": slot_analysis,
+        "recent_5_published": recent5,
+    }
 
 
 @app.post("/api/autopilot/generate-week")
