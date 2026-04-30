@@ -404,8 +404,12 @@ async def auto_post():
 async def check_auto_post():
     """Вызывается на каждый /health пинг. Запускает авто-пост если прошло нужное время,
     а пост за этот слот ещё не публиковался. Работает даже после перезапуска Render."""
+    global _auto_post_running
     from zoneinfo import ZoneInfo
     from datetime import timedelta
+
+    if _auto_post_running:
+        return
 
     settings = _effective_settings()
     if settings.get("auto_generate_enabled", "false") != "true":
@@ -420,8 +424,7 @@ async def check_auto_post():
             hour, minute = map(int, time_str.split(":"))
             slot = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
 
-            # Слот должен быть уже прошедшим сегодня (но не более 2 часов назад —
-            # чтобы не публиковать за очень старые слоты в конце дня)
+            # Слот должен быть уже прошедшим сегодня (но не более 2 часов назад)
             if not (slot <= now <= slot + timedelta(hours=2)):
                 continue
 
@@ -443,9 +446,29 @@ async def check_auto_post():
 
             _auto_post_triggered.add(key)
             logger.info(f"check_auto_post: срабатываю для слота {key} (сейчас {now.strftime('%H:%M')} Иркутск)")
-            await auto_post()
+
+            _auto_post_running = True
+            try:
+                # 1. Публикуем запланированные посты (если есть именно на этот слот)
+                await sched.check_scheduled()
+
+                # 2. Проверяем: опубликовался ли уже пост в этом слоте?
+                recent2 = db.get_posts("published")
+                published_in_slot = any(
+                    slot_iso <= p.get("published_at", "") <= slot_end_iso
+                    for p in recent2[:20]
+                )
+
+                # 3. Если нет — авто-генерируем новый пост (независимо от будущих запланированных)
+                if not published_in_slot:
+                    logger.info(f"check_auto_post: нет поста в слоте {key}, запускаю авто-генерацию")
+                    await auto_generate_and_publish()
+            finally:
+                _auto_post_running = False
+
             return  # один слот за раз
         except Exception as e:
+            _auto_post_running = False
             logger.error(f"check_auto_post ошибка для {time_str}: {e}")
 
 
