@@ -29,6 +29,8 @@ Path("static").mkdir(exist_ok=True)
 
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "").strip()
 _week_gen_running = False
+_auto_post_running = False
+_auto_post_triggered: set = set()  # "YYYY-MM-DD_HH:MM" — чтобы не постить дважды в одном слоте
 
 # Mapping: settings DB key → environment variable name
 _ENV_MAP = {
@@ -383,15 +385,62 @@ async def auto_generate_and_publish() -> tuple:
 
 
 async def auto_post():
-    """Runs at configured times. First publishes any due scheduled posts (backup for the
-    every-minute interval job that may have been missed while Render was sleeping),
-    then auto-generates new content if auto_generate_enabled=true and queue is empty."""
-    await sched.check_scheduled()  # always publish due posts at configured times
+    """Публикует просроченные запланированные посты, потом авто-генерирует если включено и очередь пуста."""
+    global _auto_post_running
+    if _auto_post_running:
+        return
+    _auto_post_running = True
+    try:
+        await sched.check_scheduled()
+        settings = _effective_settings()
+        if settings.get("auto_generate_enabled", "false") != "true":
+            return
+        if not db.get_scheduled_posts():
+            await auto_generate_and_publish()
+    finally:
+        _auto_post_running = False
+
+
+async def check_auto_post():
+    """Вызывается на каждый /health пинг. Запускает авто-пост если прошло нужное время,
+    а пост за этот слот ещё не публиковался. Работает даже после перезапуска Render."""
+    from zoneinfo import ZoneInfo
+    from datetime import timedelta
+
     settings = _effective_settings()
     if settings.get("auto_generate_enabled", "false") != "true":
         return
-    if not db.get_scheduled_posts():
-        await auto_generate_and_publish()
+
+    tz = ZoneInfo("Asia/Irkutsk")
+    now = datetime.now(tz).replace(tzinfo=None)
+    times = _safe_times(settings.get("auto_post_times", '["10:00","19:00"]'))
+
+    for time_str in sorted(times):
+        try:
+            hour, minute = map(int, time_str.split(":"))
+            slot = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+
+            # Окно: от точного времени до +30 минут (покрывает задержку пробуждения Render)
+            if not (slot <= now <= slot + timedelta(minutes=30)):
+                continue
+
+            key = slot.strftime("%Y-%m-%d_%H:%M")
+            if key in _auto_post_triggered:
+                continue  # уже обработали этот слот в этом сеансе
+
+            # Проверяем БД: может пост уже опубликован после начала слота?
+            slot_iso = slot.strftime("%Y-%m-%dT%H:%M")
+            recent = db.get_posts("published")
+            if any(p.get("published_at", "") >= slot_iso for p in recent[:10]):
+                _auto_post_triggered.add(key)
+                continue
+
+            _auto_post_triggered.add(key)
+            logger.info(f"check_auto_post: срабатываю для слота {key}")
+            await auto_post()
+            return  # один слот за раз
+        except Exception as e:
+            logger.error(f"check_auto_post ошибка для {time_str}: {e}")
 
 
 # ── Week generation (background) ─────────────────────────────────────────────
@@ -565,9 +614,10 @@ async def _auth_middleware(request: Request, call_next):
 
 @app.get("/health")
 async def health(background_tasks: BackgroundTasks):
-    # Each health ping also checks for due scheduled posts —
-    # so an external keepalive service (UptimeRobot etc.) doubles as a publish trigger.
+    # Каждый пинг keep-alive = триггер для публикации и авто-генерации.
+    # Так работает даже когда Render спит и APScheduler не может сработать вовремя.
     background_tasks.add_task(sched.check_scheduled)
+    background_tasks.add_task(check_auto_post)
     return {"ok": True, "storage": "postgresql" if db.IS_PG else "sqlite_ephemeral"}
 
 
