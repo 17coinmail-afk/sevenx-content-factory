@@ -663,19 +663,23 @@ async def _auth_middleware(request: Request, call_next):
 
 
 @app.get("/health")
-async def health(background_tasks: BackgroundTasks):
+async def health():
+    import asyncio
     from zoneinfo import ZoneInfo
 
-    # SYNCHRONOUS: решение «постить или нет» принимается прямо здесь, до отправки ответа.
-    # Это гарантирует что проверка точно выполнится при каждом пинге.
+    # Решение «постить или нет» принимается синхронно (< 100мс, только чтение БД).
+    # Гарантированно выполняется на каждом пинге.
     slot_info = await _auto_post_due_slot()
+
     if slot_info:
         key, win_start, win_end = slot_info
-        logger.info(f"health: слот {key} активен → добавляю генерацию в background")
-        background_tasks.add_task(_run_auto_post_slot, key, win_start, win_end)
+        logger.info(f"health: слот {key} → запускаю генерацию")
+        # asyncio.create_task — задача живёт в event loop, независимо от HTTP-цикла.
+        # Это надёжнее FastAPI BackgroundTasks для долгих операций (AI ~20-30 сек).
+        task = asyncio.create_task(_run_auto_post_slot(key, win_start, win_end))
+        task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
     else:
-        # Нет слота для публикации — просто проверяем запланированные посты
-        background_tasks.add_task(sched.check_scheduled)
+        asyncio.create_task(sched.check_scheduled())
 
     irkutsk_now = datetime.now(ZoneInfo("Asia/Irkutsk")).strftime("%H:%M %d.%m.%Y")
     return {"ok": True, "storage": "postgresql" if db.IS_PG else "sqlite_ephemeral", "server_time_irkutsk": irkutsk_now}
