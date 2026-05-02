@@ -52,7 +52,15 @@ def _split_text(text: str, limit: int = MESSAGE_LIMIT - 100) -> list[str]:
         else:
             if current:
                 parts.append(current)
-            current = para[:limit]
+            if len(para) <= limit:
+                current = para
+            else:
+                # Oversized single paragraph — split at last newline or space before limit
+                chunk = para[:limit]
+                cut = chunk.rfind('\n')
+                if cut < limit // 2:
+                    cut = chunk.rfind(' ')
+                current = chunk[:cut].rstrip() if cut > 0 else chunk
     if current:
         parts.append(current)
     return parts or [text[:limit]]

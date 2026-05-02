@@ -1,3 +1,4 @@
+import asyncio
 import httpx
 import xml.etree.ElementTree as ET
 from datetime import datetime
@@ -12,6 +13,7 @@ FLAGS = {"USD": "🇺🇸", "EUR": "🇪🇺", "CNY": "🇨🇳", "AED": "🇦�
 _CACHE_TTL = 300  # 5 minutes
 
 _cache: dict = {"data": None, "expires": 0.0}
+_cache_lock = asyncio.Lock()
 
 
 async def _fetch_rates() -> dict:
@@ -50,16 +52,20 @@ async def refresh_rates() -> None:
 async def get_cbr_rates() -> dict:
     if _cache["data"] and time.monotonic() < _cache["expires"]:
         return _cache["data"]
-    try:
-        result = await _fetch_rates()
-        _cache["data"] = result
-        _cache["expires"] = time.monotonic() + _CACHE_TTL
-        return result
-    except Exception as e:
-        logger.error(f"Currency fetch error: {e}")
-        if _cache["data"]:
+    async with _cache_lock:
+        # Re-check after acquiring lock — another coroutine may have fetched already
+        if _cache["data"] and time.monotonic() < _cache["expires"]:
             return _cache["data"]
-        return {"rates": {}, "date": "", "source": "error"}
+        try:
+            result = await _fetch_rates()
+            _cache["data"] = result
+            _cache["expires"] = time.monotonic() + _CACHE_TTL
+            return result
+        except Exception as e:
+            logger.error(f"Currency fetch error: {e}")
+            if _cache["data"]:
+                return _cache["data"]
+            return {"rates": {}, "date": "", "source": "error"}
 
 
 def format_rates_for_post(data: dict) -> str:
